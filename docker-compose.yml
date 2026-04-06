@@ -15,10 +15,35 @@ services:
         condition: service_healthy
       neo4j:
         condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
     networks:
       - app_network
     
     restart: unless-stopped
+
+  # ── RabbitMQ ──────────────────────────────────────────────────────────────
+  rabbitmq:
+    image: rabbitmq:4.2-management
+    container_name: rabbitmq
+    hostname: rabbitmq-host
+    environment:
+      RABBITMQ_HOST: admin
+      RABBITMQ_PASSWORD: password
+    ports:
+      - "5672:5672"    # AMQP protocol port for application connections
+      - "15672:15672"  # Management UI web interface
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq  # Persist queue data
+      - rabbitmq_logs:/var/log/rabbitmq  # Persist logs
+    healthcheck:
+      test: rabbitmq-diagnostics check_port_connectivity
+      interval: 30s
+      timeout: 30s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - app_network
 
   # ── PostgreSQL ──────────────────────────────────────────────────────────────
   postgres:
@@ -27,11 +52,12 @@ services:
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_DB: ${POSTGRES_DB:-app_db}
+      POSTGRES_DB: ${POSTGRES_DB:-oden}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./Database/sql_schema:/docker-entrypoint-initdb.d/
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
       interval: 10s
@@ -65,10 +91,39 @@ services:
       - app_network
     restart: unless-stopped
 
+  # ── Worker-1 ───────────────────────────────────────────────────────────────────
+  document-processor:
+    build:
+      context: .
+      dockerfile: workers/document_processor/Dockerfile
+    environment:
+      - PYTHONPATH=/:/app:/Config:/Database:/:Repository/:Core/:Schema/:Prompts
+    depends_on:
+      postgres:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - ./Config:/Config
+      - ./Core:/Core
+      - ./MessageBroker:/MessageBroker
+      - ./Schema:/Schema
+      - ./Repository:/Repository
+      - ./Database:/Database
+      - ./Prompts:/Prompts
+      - ./workers/document_processor:/app
+    restart: unless-stopped
+    networks:
+      - app_network
+
 volumes:
   postgres_data:
   neo4j_data:
   neo4j_logs:
+  rabbitmq_data:
+  rabbitmq_logs:
 
 networks:
   app_network:

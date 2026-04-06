@@ -35,7 +35,6 @@ class PostgresDatabase:
             autocommit=False,
             autoflush=False,
         )
-
     async def disconnect(self) -> None:
         if self._engine:
             await self._engine.dispose()
