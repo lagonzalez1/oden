@@ -97,7 +97,7 @@ services:
       context: .
       dockerfile: workers/document_processor/Dockerfile
     environment:
-      - PYTHONPATH=/:/app:/Config:/Database:/:Repository/:Core/:Schema/:Prompts
+      - PYTHONPATH=/:/app:/Config:/Database:/:Repository/:Core/:Schema/:Prompts/:LLM
     depends_on:
       postgres:
         condition: service_healthy
@@ -111,6 +111,7 @@ services:
       - ./MessageBroker:/MessageBroker
       - ./Schema:/Schema
       - ./Repository:/Repository
+      - ./LLM:/LLM
       - ./Database:/Database
       - ./Prompts:/Prompts
       - ./workers/document_processor:/app

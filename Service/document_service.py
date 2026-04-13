@@ -61,23 +61,27 @@ class BaseService(Generic[T]):
                 "doc_size": 0 # Or calculate per row if needed
             }
             # Save id to array
-            saved_ids.append(row.get("DocID"))            
+            saved_ids.append({'doc_id': row.get("DocID"), 'filing_year': int(row.get("Year")) if row.get("Year") else None})            
             # 3. Save to database using the repository's create method
             await self._repo.create(db_data)
             rows_added += 1
         # Process ids by pushing to queue, one-unit-of-work.
-        for doc_id in saved_ids:
+        count = 0
+        for item in saved_ids:
+            count += 1
             message = {
-                "doc_id": doc_id,
+                "doc_id": item['doc_id'],
+                "filing_year": item['filing_year'],
                 "action": "process_metadata",
                 "timestamp": datetime.now().isoformat()
             }
-            await rabbitmq_client.publish(
-                queue_name='worker-1',
-                message=json.dumps(message),
-                routing_key='worker-1',
-                message_type='application/json'
-            )
+            if count <= 10:
+                await rabbitmq_client.publish(
+                    queue_name='worker-1',
+                    message=json.dumps(message),
+                    routing_key='worker-1',
+                    message_type='application/json'
+                )
         return rows_added
 
     async def update(self, record_id: Any, data: dict[str, Any]) -> T | None:

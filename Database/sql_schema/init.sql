@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS oden.documents (
     
     -- Metadata Fields (Your additional requirements)
     processed_date TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    processed_status varchar(10) DEFAULT NULL,
     doc_id_parsed BOOLEAN DEFAULT FALSE,
     last_updated_date TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     doc_size INTEGER,
@@ -26,3 +27,5 @@ CREATE TABLE IF NOT EXISTS oden.documents (
     -- Optional: Add an index on Year or State for faster queries
     CONSTRAINT check_doc_size CHECK (doc_size >= 0)
 );
+
+ALTER TABLE oden.documents add processed_status varchar(10) DEFAULT null;

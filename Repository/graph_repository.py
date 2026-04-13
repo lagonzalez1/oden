@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
-from typing import Any, Generic, Sequence, TypeVar
-
+from typing import Any, Generic, Sequence, TypeVar, Dict
+import uuid
 from neo4j import AsyncSession as Neo4jSession
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -47,43 +47,128 @@ class Neo4jRepository(AbstractRepository[T]):
     def __init__(self, session: Neo4jSession):
         self._session = session
 
-    async def get_table(self, limit: int = 100, offset: int = 0, **filters) -> list[dict]:
-        """Return all nodes of `label`, with optional property filters."""
-        where_parts = " AND ".join(f"n.{k} = ${k}" for k in filters)
-        where_clause = f"WHERE {where_parts}" if where_parts else ""
+    # ── Filer (Person) ────────────────────────────────────────────────────────
 
-        cypher = (
-            f"MATCH (n:{self.label}) {where_clause} "
-            f"RETURN n SKIP $offset LIMIT $limit"
+    async def merge_filer(self, data: Dict[str, Any]) -> str:
+        """Merge the Person/Filer and their District."""
+        cypher = """
+        MERGE (p:Person {name: $name})
+        SET p.status = $status,
+            p.state_district = $state_district,
+            p.last_updated = datetime()
+        RETURN p.name as filer_id
+        """
+        result = await self._session.run(
+            cypher,
+            name=data["name"],
+            status=data["status"],
+            state_district=data["state_district"]
         )
-        params = {"offset": offset, "limit": limit, **filters}
-        result = await self._session.run(cypher, params)
-        records = await result.data()
-        return [r["n"] for r in records]
-
-    async def get_by_id(self, record_id: Any) -> dict | None:
-        cypher = f"MATCH (n:{self.label}) WHERE elementId(n) = $id RETURN n"
-        result = await self._session.run(cypher, {"id": record_id})
         record = await result.single()
-        return record["n"] if record else None
+        return record["filer_id"]
 
-    async def create(self, data: dict[str, Any]) -> dict:
-        cypher = f"CREATE (n:{self.label} $props) RETURN n"
-        result = await self._session.run(cypher, {"props": data})
-        record = await result.single()
-        return record["n"]
-
-    async def update(self, record_id: Any, data: dict[str, Any]) -> dict | None:
-        cypher = (
-            f"MATCH (n:{self.label}) WHERE elementId(n) = $id "
-            f"SET n += $props RETURN n"
+    async def merge_asset(self, tx: Dict[str, Any]) -> str:
+        """Merge Issuer and Asset, then link them."""
+        cypher = """
+        MERGE (i:Issuer {name: $issuer_name})
+        MERGE (a:Asset {ticker: $ticker})
+        ON CREATE SET a.type = $asset_type
+        MERGE (a)-[:ISSUED_BY]->(i)
+        RETURN a.ticker as asset_id
+        """
+        result = await self._session.run(
+            cypher,
+            issuer_name=tx["asset_name"],
+            ticker=tx["ticker"],
+            asset_type=tx["asset_type"]
         )
-        result = await self._session.run(cypher, {"id": record_id, "props": data})
         record = await result.single()
-        return record["n"] if record else None
+        return record["asset_id"]
 
-    async def delete(self, record_id: Any) -> bool:
-        cypher = f"MATCH (n:{self.label}) WHERE elementId(n) = $id DETACH DELETE n"
-        result = await self._session.run(cypher, {"id": record_id})
-        summary = await result.consume()
-        return summary.counters.nodes_deleted > 0
+    # ── Derivatives ───────────────────────────────────────────────────────────
+
+    async def merge_derivative(self, tx: Dict[str, Any], transaction_id: str):
+        """Handle complex instruments like Call Options."""
+        metadata = tx.get("metadata")
+        if not metadata or not metadata.get("instrument"):
+            return
+
+        cypher = """
+        MATCH (t:Transaction {id: $tx_id})
+        MATCH (a:Asset {ticker: $ticker})
+        MERGE (d:Derivative:CallOption {
+            contract_id: $ticker + "-" + $strike + "-" + $expiry
+        })
+        SET d.strike_price = $strike,
+            d.expiration_date = date($expiry)
+        MERGE (d)-[:UNDERLYING_ASSET]->(a)
+        MERGE (t)-[:OF_DERIVATIVE]->(d)
+        """
+        await self._session.run(
+            cypher,
+            tx_id=transaction_id,
+            ticker=tx["ticker"],
+            strike=metadata.get("strike_price"),
+            expiry=tx["transaction_date"] # Using trade date as proxy if expiry not explicit
+        )
+    
+    # ── Transaction (The Event) ──────────────────────────────────────────────
+
+    async def create_transaction(self, tx: Dict[str, Any], filer_name: str, filing_id: str) -> str:
+        """Create the central Transaction node and connect to Filer and Asset."""
+        tx_id = str(uuid.uuid4())
+        cypher = """
+        MATCH (p:Person {name: $filer_name})
+        MATCH (a:Asset {ticker: $ticker})
+        CREATE (t:Transaction {
+            id: $tx_id,
+            doc_id: $filing_id,
+            type: $type,
+            trade_date: date($date),
+            amount_range: $amount,
+            description: $desc,
+            created_at: datetime()
+        })
+        CREATE (p)-[:EXECUTED]->(t)
+        CREATE (t)-[:INVOLVES]->(a)
+        RETURN t.id as transaction_id
+        """
+        result = await self._session.run(
+            cypher,
+            filer_name=filer_name,
+            ticker=tx["ticker"],
+            tx_id=tx_id,
+            filing_id=filing_id,
+            type=tx["transaction_type"],
+            date=tx["transaction_date"],
+            amount=tx["amount_range"],
+            desc=tx.get("description")
+        )
+        record = await result.single()
+        return record["transaction_id"]
+
+    # ── Orchestrator ──────────────────────────────────────────────────────────
+
+    async def ingest_filing(self, result: Dict[str, Any]) -> str:
+        """
+        Orchestrates the ingestion of a full filing result.
+        """
+        # 1. Handle the Person
+        filer_id = await self.merge_filer(result)
+
+        # 2. Iterate through Transactions
+        for tx_data in result.get("transactions", []):
+            # Create the Asset/Issuer backbone
+            await self.merge_asset(tx_data)
+            
+            # Create the Transaction event
+            tx_id = await self.create_transaction(
+                tx_data, 
+                filer_id, 
+                result["filing_id"]
+            )
+            
+            # Handle complexity if it exists
+            await self.merge_derivative(tx_data, tx_id)
+
+        return result["filing_id"]
