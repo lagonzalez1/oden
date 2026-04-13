@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from Config.settings import settings
 from Database.postgres import postgres_db
-from Database.neo4j import neo4j_db
+from Database.neo4j_ import neo4j_db
 from Router.api import api_router
 from MessageBroker.rabbitmq_client import RabbitMQConfig, rabbitmq_client
 

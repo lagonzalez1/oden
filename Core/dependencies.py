@@ -4,7 +4,7 @@ from fastapi import Depends
 from neo4j import AsyncSession as Neo4jSession
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from Database.neo4j import neo4j_db
+from Database.neo4j_ import neo4j_db
 from Database.postgres import postgres_db
 
 

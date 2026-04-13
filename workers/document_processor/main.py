@@ -16,8 +16,9 @@ import fitz  # PyMuPDF
 from Prompts.Builder import PromptBuilder, PromptConfig
 from LLM.DocumentValidator import FilingExtraction
 from LLM.LocalModel import LocalModel
-from Core.dependencies import PostgresDep
+from Core.dependencies import PostgresDep, Neo4jDep
 from Repository.documents_repository import DocumentRepository
+from Repository.base_repository import Neo4jRepository
 from functools import wraps
 from Service.document_service import BaseService
 
@@ -30,15 +31,21 @@ logger = logging.getLogger(__name__)
 builder = PromptBuilder()
 
 document_repository = None
-def _postgres_service(session: Any, table: str, schema_name: str, pk_name: str) -> DocumentRepository:
+def _postgres_service(session: Any, table: str, schema_name: str, pk_name: str) -> BaseService:
     global document_repository
     if document_repository is None:
         document_repository = DocumentRepository(session)
         document_repository.table_name = table
         document_repository.schema_name = schema_name
         document_repository.pk_name = pk_name
-    return document_repository
+    return BaseService(document_repository)
 
+neo4j_reposiotry = None
+def _neo4j_service(session: Any) -> BaseService:
+    global neo4j_reposiotry
+    if neo4j_reposiotry is None:
+        neo4j_reposiotry = Neo4jRepository(session)
+    return BaseService(neo4j_reposiotry)
 
 def retry(max_retries=3, base_delay=1, exponential_base=2):
     """ Retry decorator with exponential backoff """
@@ -110,7 +117,10 @@ async def process_document_task(body, message: aio_pika.IncomingMessage):
     """ Pika context manager for processing messages ack or non-ack."""
     async with message.process(requeue=True): 
         try:
-            doc = json.loads(body)
+            if isinstance(body, dict):
+                doc = body
+            else:
+                doc = json.loads(body)
             doc_id, filing_year = doc.get('doc_id'), doc.get('filing_year')
             url = f"https://disclosures-clerk.house.gov/public_disc/ptr-pdfs/{filing_year}/{doc_id}.pdf"
             
@@ -119,9 +129,7 @@ async def process_document_task(body, message: aio_pika.IncomingMessage):
                 async with session.get(url, timeout=10) as response:
                     if response.status == 200 or response.status == 304:
                         content = await response.read()
-                        # Open PDF from memory stream
                         with fitz.open(stream=content, filetype="pdf") as doc:
-                            # --- YOUR PDF LOGIC HERE ---
                             text = "".join([page.get_text() for page in doc])
                             content = extract_llm_content_with_fallback(text)
                             if not content:
@@ -129,8 +137,6 @@ async def process_document_task(body, message: aio_pika.IncomingMessage):
                                 return False
                             page_count = doc.page_count
                             logger.info(f"[v] Read {page_count} pages for {text}")
-                        
-                        # 'content' and 'doc' are garbage collected here
                     else:
                         update = { 'processed_status': "FAILED", "last_updated_date": datetime.now(), "last_updated_date": datetime.now()}
                         document_repository.update(doc_id, update)
@@ -140,15 +146,13 @@ async def process_document_task(body, message: aio_pika.IncomingMessage):
             update = { 'processed_status': "SUCCESS", "last_updated_date": datetime.now(), "last_updated_date": datetime.now()}
             document_repository.update(doc_id, update)
             return True 
-            
         except Exception as e:
             logger.error(f"Failed to process document: {e}")
-            # Raising an error inside 'async with message.process()' 
-            # will trigger a nack and requeue it.
             raise e
 
 async def main():
 
+    _neo4j_service(Neo4jDep)
     _postgres_service(PostgresDep, "oden", "documents", "doc_id")
 
     # 1. Configure the client

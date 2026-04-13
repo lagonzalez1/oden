@@ -30,6 +30,9 @@ services:
     environment:
       RABBITMQ_HOST: admin
       RABBITMQ_PASSWORD: password
+      RABBITMQ_DEFAULT_USER : admin
+      RABBITMQ_DEFAULT_PASS: password
+
     ports:
       - "5672:5672"    # AMQP protocol port for application connections
       - "15672:15672"  # Management UI web interface
@@ -112,6 +115,7 @@ services:
       - ./Schema:/Schema
       - ./Repository:/Repository
       - ./LLM:/LLM
+      - ./Service:/Service
       - ./Database:/Database
       - ./Prompts:/Prompts
       - ./workers/document_processor:/app

@@ -16,3 +16,6 @@ aio-pika
 
 python-multipart
 pymupdf
+aiohttp
+requests
+jinja2
