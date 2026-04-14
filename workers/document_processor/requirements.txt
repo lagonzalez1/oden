@@ -19,3 +19,4 @@ pymupdf
 aiohttp
 requests
 jinja2
+pymupdf4llm

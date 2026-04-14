@@ -52,25 +52,8 @@ class PostgresRepository(AbstractRepository[T]):
     @property
     def full_table_name(self) -> str:
         """Returns the escaped full path: "schema"."table" """
-        return f'{self.table_name}.{self.schema_name}'
+        return f'{self.schema_name}.{self.table_name}'
 
-    async def get_table(self, limit: int = 100, offset: int = 0, **filters) -> Sequence[Any]:
-        where_clause = ""
-        params: dict[str, Any] = {"limit": limit, "offset": offset}
-
-        if filters:
-            # We escape column names here too for safety
-            conditions = " AND ".join(f'"{k}" = :{k}' for k in filters)
-            where_clause = f"WHERE {conditions}"
-            params.update(filters)
-
-        # Use self.full_table_name here
-        query = text(
-            f"SELECT * FROM {self.full_table_name} {where_clause} "
-            f"LIMIT :limit OFFSET :offset"
-        )
-        result = await self._session.execute(query, params)
-        return result.mappings().all()
 
     async def get_table(self, limit: int = 100, offset: int = 0, **filters) -> Sequence[Any]:
         """
@@ -129,6 +112,9 @@ class DocumentRepository(PostgresRepository):
     Just override the specific schema_names, tables ... and use the abstract classess above
     This section is for specialized queries and complex queries.
     """
+    table_name = "documents"
+    schema_name = "oden"
+    pk_name = "doc_id"
     
     async def get_by_year(self, year: int):
         query = text(f"SELECT * FROM {self.full_table_name} WHERE filing_year = :year")

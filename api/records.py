@@ -74,7 +74,7 @@ async def upload_documents_csv(
             status_code=400, 
             detail="Invalid file extension. Please upload a .csv file."
         )
-    repo = _postgres_service(session, "oden", "documents", "doc_id")
+    repo = _postgres_service(session, "documents", "oden", "doc_id")
     service = BaseService(repo)
     try:
         count = await service.process_document_csv(file)

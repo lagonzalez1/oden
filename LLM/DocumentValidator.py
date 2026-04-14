@@ -10,7 +10,7 @@ class TransactionModel(BaseModel):
     transaction_type: str = Field(description="P for Purchase, S for Sale, E for Exchange")
     transaction_date: date = Field(description="The date the trade occurred")
     notification_date: date = Field(description="The date the filer was notified/filed")
-    amount_range: str = Field(description="The dollar range, e.g., $500,001 - $1,000,000")
+    amount_range: float = Field(description="The dollar cost e.g 5000")
     cap_gains_over_200: bool = Field(default=False)
     description: Optional[str] = Field(description="Raw description text from the filing")
     

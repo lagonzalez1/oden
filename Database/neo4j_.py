@@ -1,7 +1,5 @@
 from typing import AsyncGenerator
-
 from neo4j import AsyncDriver, AsyncGraphDatabase, AsyncSession
-
 from Config.settings import settings
 
 

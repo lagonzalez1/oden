@@ -66,22 +66,19 @@ class BaseService(Generic[T]):
             await self._repo.create(db_data)
             rows_added += 1
         # Process ids by pushing to queue, one-unit-of-work.
-        count = 0
         for item in saved_ids:
-            count += 1
             message = {
                 "doc_id": item['doc_id'],
                 "filing_year": item['filing_year'],
                 "action": "process_metadata",
                 "timestamp": datetime.now().isoformat()
             }
-            if count <= 10:
-                await rabbitmq_client.publish(
-                    queue_name='worker-1',
-                    message=json.dumps(message),
-                    routing_key='worker-1',
-                    message_type='application/json'
-                )
+            await rabbitmq_client.publish(
+                queue_name='worker-1',
+                message=json.dumps(message),
+                routing_key='worker-1',
+                message_type='application/json'
+            )
         return rows_added
 
     async def update(self, record_id: Any, data: dict[str, Any]) -> T | None:

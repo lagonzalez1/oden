@@ -9,8 +9,6 @@ from typing import Dict, Optional, Any
 from MessageBroker.rabbitmq_client import RabbitMQConfig, rabbitmq_client
 from Config.settings import settings
 import aio_pika
-from aio_pika import Message, ExchangeType, connect_robust
-from aio_pika.abc import AbstractRobustConnection, AbstractRobustChannel, AbstractRobustQueue
 import aiohttp
 import fitz  # PyMuPDF
 from Prompts.Builder import PromptBuilder, PromptConfig
@@ -18,9 +16,12 @@ from LLM.DocumentValidator import FilingExtraction
 from LLM.LocalModel import LocalModel
 from Core.dependencies import PostgresDep, Neo4jDep
 from Repository.documents_repository import DocumentRepository
-from Repository.base_repository import Neo4jRepository
+from Repository.graph_repository import TransactionRepository
 from functools import wraps
-from Service.document_service import BaseService
+from Service.document_service import BaseService as DocumentService
+from Service.graph_service import BaseService as GraphService
+from Database.postgres import postgres_db
+from Database.neo4j_ import neo4j_db
 
 
 logging.basicConfig(level=logging.INFO)
@@ -30,22 +31,24 @@ logger = logging.getLogger(__name__)
 # from rabbit_client import rabbitmq_client, RabbitMQConfig
 builder = PromptBuilder()
 
-document_repository = None
-def _postgres_service(session: Any, table: str, schema_name: str, pk_name: str) -> BaseService:
+document_repository: Optional[DocumentRepository] = None
+neo4j_repository: Optional[TransactionRepository] = None
+
+def _postgres_service(session: Any, schema_name: str, table: str, pk_name: str) -> DocumentService:
     global document_repository
     if document_repository is None:
         document_repository = DocumentRepository(session)
         document_repository.table_name = table
         document_repository.schema_name = schema_name
         document_repository.pk_name = pk_name
-    return BaseService(document_repository)
+    return DocumentService(document_repository)
 
-neo4j_reposiotry = None
-def _neo4j_service(session: Any) -> BaseService:
-    global neo4j_reposiotry
-    if neo4j_reposiotry is None:
-        neo4j_reposiotry = Neo4jRepository(session)
-    return BaseService(neo4j_reposiotry)
+
+def _neo4j_service(session: Any) -> GraphService:
+    global neo4j_repository
+    if neo4j_repository is None:
+        neo4j_repository = TransactionRepository(session)
+    return GraphService(neo4j_repository)
 
 def retry(max_retries=3, base_delay=1, exponential_base=2):
     """ Retry decorator with exponential backoff """
@@ -97,13 +100,13 @@ async def process_text_llm(text: Optional[str])->Optional[Dict]:
 
     
 @retry(max_retries=3, base_delay=2)
-def extract_llm_content_with_fallback(extracted_text: str) -> dict:
+async def extract_llm_content_with_fallback(extracted_text: str) -> dict:
     """
     Try Gemini first, fallback to OpenAI if Gemini fails.
     If both fail, raise error so retry decorator triggers.
     """
     try:
-        response = process_text_llm(extracted_text)
+        response = await process_text_llm(extracted_text)
         if response and isinstance(response, dict):
             return response
     except Exception as e:
@@ -115,7 +118,8 @@ def extract_llm_content_with_fallback(extracted_text: str) -> dict:
 
 async def process_document_task(body, message: aio_pika.IncomingMessage):
     """ Pika context manager for processing messages ack or non-ack."""
-    async with message.process(requeue=True): 
+    async with message.process(requeue=True):
+        
         try:
             if isinstance(body, dict):
                 doc = body
@@ -131,32 +135,30 @@ async def process_document_task(body, message: aio_pika.IncomingMessage):
                         content = await response.read()
                         with fitz.open(stream=content, filetype="pdf") as doc:
                             text = "".join([page.get_text() for page in doc])
-                            content = extract_llm_content_with_fallback(text)
+                            logger.info(f"[HTTP RESPONSE] {text.count}")
+                            content = await extract_llm_content_with_fallback(text)
                             if not content:
-                                logger.info(f"Unable to get llm content from text, will try again for doc_id {doc_id}")
-                                return False
-                            page_count = doc.page_count
-                            logger.info(f"[v] Read {page_count} pages for {text}")
+                                ##update = { 'processed_status': "FAILED-LLM-PARSE", "last_updated_date": datetime.now(), "last_updated_date": datetime.now()}
+                                ##await document_repository.update(doc_id, update)
+                                return True
+                            ##update = { 'processed_status': "SUCCESS", "last_updated_date": datetime.now(), "last_updated_date": datetime.now()}
+                            ##await document_repository.update(doc_id, update)
+                            await neo4j_repository.ingest_filing(content)
                     else:
-                        update = { 'processed_status': "FAILED", "last_updated_date": datetime.now(), "last_updated_date": datetime.now()}
-                        document_repository.update(doc_id, update)
+                        ##update = { 'processed_status': "FAILED-DOC-INVALID", "last_updated_date": datetime.now(), "last_updated_date": datetime.now()}
+                        ##await document_repository.update(doc_id, update)
                         logger.warning(f"[!] File {doc_id} returned status {response.status}")
+                        return False
             
-            logger.info(f" [v] Successfully finished {doc.get('doc_id')}")
-            update = { 'processed_status': "SUCCESS", "last_updated_date": datetime.now(), "last_updated_date": datetime.now()}
-            document_repository.update(doc_id, update)
             return True 
         except Exception as e:
             logger.error(f"Failed to process document: {e}")
             raise e
 
 async def main():
-
-    _neo4j_service(Neo4jDep)
-    _postgres_service(PostgresDep, "oden", "documents", "doc_id")
-
-    # 1. Configure the client
-    # Update these values to match your docker-compose environment
+    await postgres_db.connect()
+    await neo4j_db.connect()
+    
     config = RabbitMQConfig(
         host=settings.RABBITMQ_HOST,
         port=settings.RABBITMQ_PORT,
@@ -167,26 +169,36 @@ async def main():
     rabbitmq_client.config = config
     
     try:
-        # 2. Establish connection
         await rabbitmq_client.connect()
         
-        # 3. Start consuming from 'worker-1'
-        # prefetch_count=1 ensures the worker only takes one task at a time
-        await rabbitmq_client.consume(
-            queue_name="worker-1",
-            callback=process_document_task,
-            prefetch_count=1
-        )
-        
-        logger.info(" [*] Waiting for messages. To exit press CTRL+C")
-        
-        # 4. Keep the loop running forever
-        await asyncio.Future() 
-        
+        async for postgres_session in postgres_db.get_session():
+            async for neo4j_session in neo4j_db.get_session():
+                try:
+                    _neo4j_service(neo4j_session)
+                    _postgres_service(postgres_session, "oden", "documents", "doc_id")
+                    
+                    await rabbitmq_client.consume(
+                        queue_name="worker-1",
+                        callback=process_document_task,
+                        prefetch_count=1
+                    )
+                    
+                    logger.info(" [*] Waiting for messages. To exit press CTRL+C")
+                    await asyncio.Future()
+                    
+                finally:
+                    # Clean up sessions when done
+                    await postgres_session.close()
+                    await neo4j_session.close()
+                break  # Only need one session
+            break
+            
     except asyncio.CancelledError:
         logger.info("Worker stopped by user.")
     finally:
         await rabbitmq_client.close()
+        await postgres_db.disconnect()
+        await neo4j_db.disconnect()
 
 if __name__ == "__main__":
     try:
