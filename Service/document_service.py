@@ -2,10 +2,9 @@ import csv
 import io
 import json
 from datetime import datetime
-from typing import Any
 from fastapi import UploadFile
 from Repository.documents_repository import AbstractRepository
-from typing import Any, Generic, Sequence, TypeVar
+from typing import Any, Generic, Sequence, TypeVar, List, Dict
 from MessageBroker.rabbitmq_client import rabbitmq_client
 
 T = TypeVar("T")
@@ -37,12 +36,10 @@ class BaseService(Generic[T]):
         content = await file.read()
         # Use io.StringIO to treat bytes as a file-like object for the CSV reader
         csv_reader = csv.DictReader(io.StringIO(content.decode("utf-8")))
-        
         rows_added = 0
         
         for row in csv_reader:
             # 1. Map CSV columns to DB columns (Handling potential naming mismatches)
-            # Note: Your CSV headers must match these keys exactly or be mapped here.
             db_data = {
                 "doc_id": row.get("DocID"),
                 "prefix": row.get("Prefix"),
@@ -66,7 +63,8 @@ class BaseService(Generic[T]):
             await self._repo.create(db_data)
             rows_added += 1
         # Process ids by pushing to queue, one-unit-of-work.
-        for item in saved_ids:
+        for i in range(len(saved_ids)-1):
+            item = saved_ids[i]
             message = {
                 "doc_id": item['doc_id'],
                 "filing_year": item['filing_year'],
@@ -77,9 +75,31 @@ class BaseService(Generic[T]):
                 queue_name='worker-1',
                 message=json.dumps(message),
                 routing_key='worker-1',
-                message_type='application/json'
+                message_type='application/json',
+                expiration=500000
             )
         return rows_added
+
+
+
+    async def process_unprocessed_documents(self, documents: Sequence[Any])->int:
+        for i in range(20):
+            item = documents[i]
+            message = {
+                "doc_id": item['doc_id'],
+                "filing_year": item['filing_year'],
+                "action": "process_metadata",
+                "timestamp": datetime.now().isoformat()
+            }
+            await rabbitmq_client.publish(
+                queue_name='worker-1',
+                message=json.dumps(message),
+                routing_key='worker-1',
+                message_type='application/json',
+                expiration=500000
+            )
+        return len(documents)
+
 
     async def update(self, record_id: Any, data: dict[str, Any]) -> T | None:
         """Update and return an existing record, or None if not found."""

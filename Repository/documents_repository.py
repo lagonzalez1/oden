@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, Generic, Sequence, TypeVar
+from typing import Any, Generic, Sequence, TypeVar, Dict
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -55,7 +55,7 @@ class PostgresRepository(AbstractRepository[T]):
         return f'{self.schema_name}.{self.table_name}'
 
 
-    async def get_table(self, limit: int = 100, offset: int = 0, **filters) -> Sequence[Any]:
+    async def get_table(self, limit: int = 100, offset: int = 0, filters: Dict = {}) -> Sequence[Any]:
         """
         Fetch all rows from `table_name`, with optional key=value filters.
         Replace with SQLAlchemy ORM / select() calls in your subclass.
@@ -64,7 +64,7 @@ class PostgresRepository(AbstractRepository[T]):
         params: dict[str, Any] = {"limit": limit, "offset": offset}
 
         if filters:
-            conditions = " AND ".join(f"{k} = :{k}" for k in filters)
+            conditions = " AND ".join(f"{k} = {v}" for k,v in filters.items())
             where_clause = f"WHERE {conditions}"
             params.update(filters)
 
@@ -72,6 +72,7 @@ class PostgresRepository(AbstractRepository[T]):
             f"SELECT * FROM {self.full_table_name} {where_clause} "
             f"LIMIT :limit OFFSET :offset"
         )
+        print(query)
         result = await self._session.execute(query, params)
         return result.mappings().all()
 
@@ -115,6 +116,7 @@ class DocumentRepository(PostgresRepository):
     table_name = "documents"
     schema_name = "oden"
     pk_name = "doc_id"
+
     
     async def get_by_year(self, year: int):
         query = text(f"SELECT * FROM {self.full_table_name} WHERE filing_year = :year")

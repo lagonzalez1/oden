@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     RABBITMQ_USER: str = os.getenv("RABBITMQ_USER")
     RABBITMQ_PASSWORD: str = os.getenv("RABBITMQ_PASSWORD")
     RABBITMQ_VHOST: str = os.getenv("RABBITMQ_VHOST")
+    RABBITMQ_HEARTBEAT: int = os.getenv("RABBITMQ_HEARTBEAT")
 
 
 settings = Settings()

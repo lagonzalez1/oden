@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 from typing import Optional, Callable, Any, Dict
 from contextlib import asynccontextmanager
@@ -19,6 +20,7 @@ class RabbitMQConfig:
     username: str = "admin"
     password: str = "password"
     virtual_host: str = "/"
+    heartbeat: int = 0
     
     @property
     def url(self) -> str:
@@ -152,7 +154,7 @@ class RabbitMQClient:
                 try:
                     # Parse message based on content type
                     if message.content_type == "application/json":
-                        import json
+                        
                         body = json.loads(message.body.decode())
                     else:
                         body = message.body.decode()
@@ -163,13 +165,11 @@ class RabbitMQClient:
                     # If callback returns True, we manually ack
                     if result is False:
                         await message.nack(requeue=True)
-                    elif not auto_ack:
+                    else:
                         await message.ack()
                         
                 except Exception as e:
                     logger.error(f"Error processing message from {queue_name}: {e}")
-                    if not auto_ack:
-                        await message.nack(requeue=True)
         
         await queue.consume(on_message)
         logger.info(f"Started consuming from queue: {queue_name}")

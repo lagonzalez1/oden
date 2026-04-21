@@ -29,3 +29,27 @@ CREATE TABLE IF NOT EXISTS oden.documents (
 );
 
 ALTER TABLE oden.documents add processed_status varchar(10) DEFAULT null;
+
+
+CREATE SCHEMA IF NOT EXISTS market_data;
+
+-- Table for storing raw and enriched news data
+CREATE TABLE IF NOT EXISTS market_data.stock_news (
+    news_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ticker VARCHAR(10) NOT NULL,
+    headline TEXT NOT NULL,
+    summary TEXT,
+    sentiment INTEGER,              -- e.g., -1 (Negative) to 1 (Positive)
+    event_type VARCHAR(50),         -- e.g., 'merger', 'bankruptcy', 'vote', 'earnings'
+    is_speculative BOOLEAN DEFAULT FALSE,
+    source_url TEXT,
+    published_date TIMESTAMPTZ NOT NULL,
+    ingested_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+
+    -- Prevents duplicate entries from multiple API calls
+    CONSTRAINT unique_ticker_news UNIQUE (ticker, headline, published_date)
+);
+
+-- Index for fast lookups on ticker-specific news sorted by date
+CREATE INDEX IF NOT EXISTS idx_news_ticker_date 
+ON market_data.stock_news (ticker, published_date DESC);

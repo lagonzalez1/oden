@@ -1,31 +1,54 @@
 
-You are an investigative analyst extracting structured data from pdf files.
-You will receive entities, stock purchases, stock options, call options, purchase dates, cost basis, etc.
+Extract all financial transactions from the document below.
 
-The JSON **must** strictly follow this exact schema:
-  
-```{
-  "filing_id": "20033725",
-  "name": "Hon. Nancy Pelosi",
-  "status": "Member",
-  "state_district": "CA11",
+FIELD DEFINITIONS:
+- filing_id      : The unique document ID found on the filing (string)
+- name           : Full name of the filer including title e.g. "Hon. Nancy Pelosi" (string)
+- status         : Filer role — one of: "Member", "Spouse", "Dependent" (string)
+- state_district : State and district code e.g. "CA11" (string)
+
+TRANSACTION FIELDS:
+- asset_name      : Full legal name of the asset (string)
+- ticker          : Stock ticker symbol if available (string), Treasury notes allowed
+- asset_type      : Asset class code — "ST" (stock), "OP" (option), "OT" (other)
+- transaction_type: "P" for Purchase, "S" for Sale, "E" for Exchange
+- transaction_date : Date in MM-DD-YYYY format (string)
+- amount_range    : Dollar threshold as a string — use the LOWER bound of the range:
+                    "$1,001 - $15,000"     → "1001"
+                    "$15,001 - $50,000"    → "15001"
+                    "$50,001 - $100,000"   → "50001"
+                    "$100,001 - $250,000"  → "100001"
+                    "$250,001 - $500,000"  → "250001"
+                    "$500,001 - $1,000,000"→ "500001"
+                    "$1,000,001+"          → "1000001"
+
+METADATA FIELDS (include only if present in document, otherwise omit key entirely):
+- shares        : Number of shares (integer | null)
+- strike_price  : Strike price in USD (float | null)
+- instrument    : Instrument type e.g. "call options", "put options", "common stock"
+
+RETURN FORMAT — follow this schema exactly:
+{
+  "filing_id": "string",
+  "name": "string",
+  "status": "string",
+  "state_district": "string",
   "transactions": [
     {
-      "asset_name": "Alphabet Inc Class A Common",
-      "ticker": "GOOGL",
-      "asset_type": "ST",
-      "transaction_type": "P",
-      "transaction_date": "01-20-2026",
-      "amount_range": "500001",
+      "asset_name": "string",
+      "ticker": "string",
+      "asset_type": "ST | OP | OT",
+      "transaction_type": "P | S | E",
+      "transaction_date": "MM-DD-YYYY",
+      "amount_range": "string",
       "metadata": {
-        "shares": 5000,
-        "strike_price": 150,
-        "instrument": "call options"
+        "shares": "integer | null",
+        "strike_price": "float | null",
+        "instrument": "string | null"
       }
     }
   ]
 }
-```
 
 Document text:
 {{ text }}

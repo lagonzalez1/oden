@@ -9,6 +9,7 @@ class PromptConfig(BaseModel):
     template_name: str
     model: str
     variables: Dict[str, Any]
+    images: List[str] = None 
     system_variables: Dict[str, Any]
     system_template_name: Optional[str] = None
     max_tokens: Optional[int] = None
@@ -68,6 +69,14 @@ class PromptBuilder:
                 "role": "user",
                 "content":  user_prompt,
             })
+
+            if config.images:
+                for i in range(len(config.images)):
+                    messages.append({
+                        "role": "user",
+                        "content":  "What is this image",
+                        "image": [config.images[i]]
+                    })
             
             return {
                 "messages": messages,

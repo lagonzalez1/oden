@@ -16,7 +16,8 @@ async def lifespan(app: FastAPI):
         port=settings.RABBITMQ_PORT,
         username=settings.RABBITMQ_USER,
         password=settings.RABBITMQ_PASSWORD,
-        virtual_host=settings.RABBITMQ_VHOST
+        virtual_host=settings.RABBITMQ_VHOST,
+        heartbeat=settings.RABBITMQ_HEARTBEAT
     )
     rabbitmq_client.config = config
     await rabbitmq_client.connect()

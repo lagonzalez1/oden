@@ -9,6 +9,7 @@ from Repository.documents_repository import DocumentRepository
 from MessageBroker import rabbitmq_client
 from Repository.graph_repository import Neo4jRepository
 from Service.document_service import BaseService
+from Schema.base_schema import DocumentUpdateRequest
 router = APIRouter()
 
 
@@ -43,7 +44,7 @@ async def scan_documents(
     """
     Performs a scan of the documents table with optional pagination and filtering.
     """
-    repo = _postgres_service(session, "oden", "documents", "doc_id")
+    repo = _postgres_service(session, "documents", "oden", "doc_id")
     
     # Prepare filters for the get_table method
     filters = {}
@@ -62,8 +63,21 @@ async def scan_documents(
         "data": rows
     }
 
+@doc_router.post("/update_data_test", summary="Update data given id")
+async def update_data(
+    session: PostgresDep,
+    update: DocumentUpdateRequest
+):
+    """ Performs a scan of the documents table with optional pagination and filtering. """
+    dict_data = update.update_data.model_dump(exclude_none=True) if update.update_data else {}
+    repo = _postgres_service(session, "documents", "oden", "doc_id")
+    # get_table is inherited from your PostgresRepository
+    rows = await repo.update(update.doc_id, dict_data)
+    return {
+        "update": rows,
+    }
 
-@doc_router.post("/upload-csv", status_code=status.HTTP_201_CREATED)
+@doc_router.post("/upload_csv", status_code=status.HTTP_201_CREATED)
 async def upload_documents_csv(
     session: PostgresDep,
     file: UploadFile = File(...)
@@ -90,7 +104,19 @@ async def upload_documents_csv(
             detail=f"Error processing CSV: {str(e)}"
         )
 
-
+@doc_router.post("/doc_id_check", summary="Check unprocessesed doc_ids, send to queue to process.", status_code=status.HTTP_201_CREATED)
+async def doc_id_check(
+    session: PostgresDep,
+):
+    """ Get unprocesses documents, simple Boolean check for now, but in the future date check will work best. """
+    repo = _postgres_service(session, "documents", "oden", "doc_id")
+    service = BaseService(repo)
+    rows, count = await repo.get_table(300, 0, filters={"doc_id_parsed": False}), 0
+    if rows:
+        count = await service.process_unprocessed_documents(rows)
+    return {
+        "messages_in_queue": count,
+    }
 
 # ── Neo4j example routes ──────────────────────────────────────────────────────
 
