@@ -28,7 +28,6 @@ CREATE TABLE IF NOT EXISTS oden.documents (
     CONSTRAINT check_doc_size CHECK (doc_size >= 0)
 );
 
-ALTER TABLE oden.documents add processed_status varchar(10) DEFAULT null;
 
 
 CREATE SCHEMA IF NOT EXISTS market_data;
@@ -53,3 +52,44 @@ CREATE TABLE IF NOT EXISTS market_data.stock_news (
 -- Index for fast lookups on ticker-specific news sorted by date
 CREATE INDEX IF NOT EXISTS idx_news_ticker_date 
 ON market_data.stock_news (ticker, published_date DESC);
+
+
+
+-- Table to store gains based on document
+CREATE TABLE oden.stock_gains (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    
+    -- Filing & Entity Tracking
+    doc_id VARCHAR(50) NOT NULL,
+    filer_name VARCHAR(255) NOT NULL,
+    ticker VARCHAR(10) NOT NULL,
+    asset_type VARCHAR(50),
+    
+    -- Trade Details
+    transaction_type VARCHAR(20) NOT NULL,
+    trade_date DATE NOT NULL,
+    amount_range VARCHAR(100),
+    amount_min NUMERIC(14,2),
+    amount_max NUMERIC(14,2),
+    estimated_cost NUMERIC(14,2),      
+    quantity NUMERIC(14,4),            
+    
+    -- Performance Tracking
+    current_price NUMERIC(14,4),       
+    price_change_pct NUMERIC(8,2),
+    
+    -- Audit & Metadata
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+
+CREATE TABLE oden.natural_language_queries(
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    question TEXT DEFAULT NULL,
+    response TEXT DEFAULT NULL,
+    params TEXT DEFAULT NULL,
+    status VARCHAR(100),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);

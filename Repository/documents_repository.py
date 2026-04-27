@@ -2,6 +2,11 @@ from abc import ABC, abstractmethod
 from typing import Any, Generic, Sequence, TypeVar, Dict
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+from contextlib import asynccontextmanager
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
@@ -42,9 +47,9 @@ class PostgresRepository(AbstractRepository[T]):
     Subclass and set `table_name` (and optionally override methods)
     to get a working repository with minimal boilerplate.
     """
-    table_name: str = ""  # override in subclass
-    schema_name: str = ""
-    pk_name: str = "id"
+    table_name: str = "documents" 
+    schema_name: str = "oden"
+    pk_name: str = "doc_id"
 
     def __init__(self, session: AsyncSession):
         self._session = session
@@ -53,6 +58,18 @@ class PostgresRepository(AbstractRepository[T]):
     def full_table_name(self) -> str:
         """Returns the escaped full path: "schema"."table" """
         return f'{self.schema_name}.{self.table_name}'
+
+    @asynccontextmanager 
+    async def transaction(self):
+        """ Get a transaction based on current session. """
+        try:
+            yield self._session
+            await self._session.commit()
+        except Exception:
+            await self._session.rollback()
+            raise
+        finally:
+            await self._session.close()
 
 
     async def get_table(self, limit: int = 100, offset: int = 0, filters: Dict = {}) -> Sequence[Any]:
@@ -82,22 +99,37 @@ class PostgresRepository(AbstractRepository[T]):
         return result.mappings().first()
 
     async def create(self, data: dict[str, Any]) -> Any:
-        columns = ", ".join(data.keys())
-        values = ", ".join(f":{k}" for k in data.keys())
-        query = text(
-            f"INSERT INTO {self.full_table_name} ({columns}) VALUES ({values}) RETURNING *"
-        )
-        print(self.full_table_name)
-        result = await self._session.execute(query, data)
-        return result.mappings().first()
+        try:
+            columns = ", ".join(data.keys())
+            values = ", ".join(f":{k}" for k in data.keys())
+            query = text(
+                f"INSERT INTO {self.full_table_name} ({columns}) VALUES ({values}) RETURNING *"
+            )
+            result = await self._session.execute(query, data)
+            return result.mappings().first()
+        except sqlalchemy.exc.InvalidRequestError as e:
+            logger.error(f"[DocumentRepository Error] error: {e}")
+            raise e
+        except sqlalchemy.exc.ArgumentError as e:
+            logger.error(f"[DocumentRepository Error] error: {e}")
+            raise e
 
-    async def update(self, record_id: Any, data: dict[str, Any]) -> Any | None:
-        set_clause = ", ".join(f"{k} = :{k}" for k in data.keys())
-        query = text(
-            f"UPDATE {self.full_table_name} SET {set_clause} WHERE {self.pk_name} = :id RETURNING *"
-        )
-        result = await self._session.execute(query, {**data, "id": record_id})
-        return result.mappings().first()
+
+    async def update(self, record_id: str, data: Dict[str, Any]) -> Any | None:
+        try:
+            set_clause = ", ".join(f"{k} = :{k}" for k in data.keys())
+            query = text(
+                f"UPDATE {self.full_table_name} SET {set_clause} WHERE {self.pk_name} = :id RETURNING *"
+            )
+            params = {**data, "id": record_id}
+            result = await self._session.execute(query, params)
+            return result.mappings().first()
+        except sqlalchemy.exc.InvalidRequestError as e:
+            logger.error(f"[DocumentRepository Error] error: {e}")
+            raise e
+        except sqlalchemy.exc.ArgumentError as e:
+            logger.error(f"[DocumentRepository Error] error: {e}")
+            raise e
 
     async def delete(self, record_id: Any) -> bool:
         query = text(f"DELETE FROM {self.full_table_name} WHERE {self.pk_name} = :id")

@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, Generic, Sequence, TypeVar, Dict
+from typing import Any, Generic, Sequence, TypeVar, Dict, List
 import uuid
 from neo4j import AsyncSession as Neo4jSession
 
@@ -47,6 +47,27 @@ class Neo4jRepository(AbstractRepository[T]):
         self._session = session
     
         # ── Implement required abstract methods ──────────────────────────────────
+
+    async def get_assets(self)->List[Dict[str, Any]]:
+        cypher = """
+            MATCH(a:Asset)
+            OPTIONAL MATCH (a)-[:ISSUED_BY]->(i:Issuer)
+            RETURN 
+                a.ticker    AS ticker,
+                a.type      AS asset_type,
+                i.name      AS issuer_name
+            ORDER BY a.ticker ASC
+        """
+        result = await self._session.run(cypher)
+        records = await result.data()
+        return [
+        {
+            "ticker":      record["ticker"],
+            "asset_type":  record["asset_type"],
+            "issuer_name": record["issuer_name"],
+        }
+            for record in records
+        ]
     
     async def get_table(self, **filters) -> Sequence[T]:
         """Return nodes from Neo4j."""
@@ -133,6 +154,8 @@ class TransactionRepository(Neo4jRepository):
 
     async def merge_asset(self, tx: Dict[str, Any]) -> str:
         """Merge Issuer and Asset, then link them."""
+        if tx.get("ticker") is None:
+            return
         cypher = """
         MERGE (i:Issuer {name: $issuer_name})
         MERGE (a:Asset {ticker: $ticker})
@@ -156,6 +179,11 @@ class TransactionRepository(Neo4jRepository):
         if not metadata or not metadata.get("instrument"):
             return
 
+        if metadata and metadata.get("strike_price") is None:
+            return
+
+        if metadata and metadata.get("ticker") is None:
+            return
         cypher = """
         MATCH (t:Transaction {id: $tx_id})
         MATCH (a:Asset {ticker: $ticker})
@@ -178,7 +206,9 @@ class TransactionRepository(Neo4jRepository):
     # ── Transaction (The Event) ──────────────────────────────────────────────
     async def create_transaction(self, tx: Dict[str, Any], filer_name: str, filing_id: str) -> str:
         """Create the central Transaction node and connect to Filer and Asset."""
-        tx_id = str(uuid.uuid4())
+        if tx and tx.get("ticker") is None:
+            return
+        tx_id = str(uuid.uuid4()) 
         cypher = """
         MATCH (p:Person {name: $filer_name})
         MATCH (a:Asset {ticker: $ticker})
@@ -211,26 +241,4 @@ class TransactionRepository(Neo4jRepository):
 
     # ── Orchestrator ──────────────────────────────────────────────────────────
 
-    async def ingest_filing(self, result: Dict[str, Any]) -> str:
-        """
-        Orchestrates the ingestion of a full filing result.
-        """
-        # 1. Handle the Person
-        filer_id = await self.merge_filer(result)
-
-        # 2. Iterate through Transactions
-        for tx_data in result.get("transactions", []):
-            # Create the Asset/Issuer backbone
-            await self.merge_asset(tx_data)
-            
-            # Create the Transaction event
-            tx_id = await self.create_transaction(
-                tx_data, 
-                filer_id, 
-                result["filing_id"]
-            )
-            
-            # Handle complexity if it exists
-            await self.merge_derivative(tx_data, tx_id)
-
-        return result["filing_id"]
+    

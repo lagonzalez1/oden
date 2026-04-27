@@ -10,13 +10,9 @@ from typing import Dict, Optional, Any, List
 from MessageBroker.rabbitmq_client import RabbitMQConfig, rabbitmq_client
 from Config.settings import settings
 import aio_pika
-import aiohttp
-import fitz  # PyMuPDF
 from Prompts.Builder import PromptBuilder, PromptConfig
 from LLM.DocumentValidator import FilingExtraction
 from LLM.LocalModel import LocalModel
-from LLM.LamaModel import LamaModel
-from LLM.VisonModel import VisionModel
 from Core.dependencies import PostgresDep, Neo4jDep
 from Repository.documents_repository import DocumentRepository
 from Repository.graph_repository import TransactionRepository
@@ -24,13 +20,9 @@ from Core.SqlAlchemyUnitOfWork import SqlAlchemyUnitOfWork
 from functools import wraps
 from Service.document_service import DocumentsService
 from Service.graph_service import BaseService as GraphService
-from Downloads.DownloadFile import DownloadFile 
 from Database.postgres import postgres_db
 from Database.neo4j_ import neo4j_db
 import io
-from PIL import Image
-import base64
-
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -75,17 +67,17 @@ def retry(max_retries=3, base_delay=1, exponential_base=2):
 async def process_text_llm(text: Optional[str])->Optional[Dict]:
     """Extract LLM content with retry on validation errors"""
     prompt_config = PromptConfig(
-        template_name="reader_identity",
-        system_template_name="system",
+        template_name="cypher_system_prompt",
+        system_template_name="cypher_system_prompt",
         system_variables={
             "dummy_key": None,
         },
         model="qwen3.5",
         variables={
-            "text": text,
+            "natural_language_query": text,
         },
         max_tokens=80000,
-        temperature=0.1,
+        temperature=0,
     )
     
     prompt_data = builder.build(prompt_config)
@@ -96,36 +88,9 @@ async def process_text_llm(text: Optional[str])->Optional[Dict]:
         raise ValueError(f"Invalid response from secondary model : {response}")
     return response
 
-
-async def process_text_vision(image: bytes)->Optional[Dict]:
-    """Extract LLM content with retry on validation errors"""
-    image_b64 = base64.b64encode(image).decode("utf-8")
-    prompt_config = PromptConfig(
-        template_name="reader_identity",
-        system_template_name="system",
-        system_variables={
-            "dummy_key": None,
-        },
-        model="llama3.2-vision",
-        variables={
-            "text": "",
-        },
-        images=[image_b64],
-        max_tokens=80000,
-        temperature=0.1,
-    )
-    
-    prompt_data = builder.build(prompt_config)
-    model = VisionModel(FilingExtraction, prompt_data)
-    response = model._invoke_model()
-    # Add validation check here if needed
-    if not response or not isinstance(response, dict):
-        raise ValueError(f"Invalid response from secondary model : {response}")
-    return response
-
     
 @retry(max_retries=3, base_delay=2)
-async def extract_llm_content_with_fallback(content: bytes, text_content: str) -> Optional[dict]:
+async def extract_llm_content_with_fallback(text_content: str) -> Optional[dict]:
     """ Try the text model first """
     try:
         if not text_content:
@@ -138,18 +103,7 @@ async def extract_llm_content_with_fallback(content: bytes, text_content: str) -
         logger.warning(f"Local model failed: {e}")
     except Exception as e:
         logger.warning(f"Fallback model failed: {e}")
-    try:
-        if not content:
-            return None
-        response = await process_text_vision(content)
-        if response and isinstance(response, dict):
-            return response
-        return None
-    except Exception as e:
-        logger.warning(f"Local model failed: {e}")
-    except Exception as e:
-        logger.warning(f"Fallback model failed: {e}")
-    
+
     raise RuntimeError("Both primary and fallback LLM extraction failed")
 
 async def process_document_task(body, message: aio_pika.IncomingMessage, postgres_session, neo4j_session):
@@ -162,101 +116,21 @@ async def process_document_task(body, message: aio_pika.IncomingMessage, postgre
         else:
             doc = json.loads(body)
 
-        doc_id = doc.get("doc_id")
-        downloader = DownloadFile(body)
-        pdf_content = await downloader.get_pdf()
-        if pdf_content is None:
-            await failed_extraction(doc_id, document_service)
-            logger.warning(f"[!] File {doc_id} returned status")
-            return True
-        if pdf_content:
-            text = downloader.get_text()
-            if text:
-                content = await extract_llm_content_with_fallback(content=None, text_content=text)
-                if content:
-                    await successfull_extraction_save(doc_id, content, len(text), document_service, neo4j_service)
-                    return True
+        question, _id = doc.get("question"), doc.get("id")
+        if question:
+            content = await extract_llm_content_with_fallback(text_content=question)
+            if content:
+                data = {'response': content.cypher, 'params': content.params, 'updated_at': datetime.now()}
+                await document_service.update_query_request(id, data)
+                return True
+            else:
+                return False
 
-        await failed_extraction(doc_id, document_service)
-        return True 
+        return False
     except Exception as e:
         logger.error(f"Failed to process document: {e}")
         return False
 
-
-def stock_content(filing_extraction: Dict[str, Any], doc_id: str) -> List[Dict[str, Any]]:
-    rows = []
-    filer_name = filing_extraction.get("name")
-    transactions = filing_extraction.get("transactions", [])
-
-    for txn in transactions:
-        # 1. Parse Amount Range / Cost
-        raw_amount = txn.get("amount_range")
-        amount_min: Optional[float] = None
-        amount_max: Optional[float] = None
-        estimated_cost: Optional[float] = None
-        amount_range_str: Optional[str] = str(raw_amount) if raw_amount is not None else None
-
-        if isinstance(raw_amount, (int, float)):
-            estimated_cost = float(raw_amount)
-        elif isinstance(raw_amount, str):
-            # Clean currency symbols & commas, then parse range if present
-            cleaned = re.sub(r'[^\d.\-]', '', raw_amount)
-            if '-' in cleaned:
-                try:
-                    parts = cleaned.split('-')
-                    amount_min = float(parts[0])
-                    amount_max = float(parts[1])
-                    estimated_cost = (amount_min + amount_max) / 2.0
-                except ValueError:
-                    pass
-            else:
-                try:
-                    estimated_cost = float(cleaned)
-                except ValueError:
-                    pass
-
-        # 2. Extract Quantity from Metadata
-        metadata = txn.get("metadata") or {}
-        quantity_val = metadata.get("share_count") or metadata.get("quantity") or metadata.get("num_shares")
-        quantity = float(quantity_val) if quantity_val is not None else None
-
-        # 3. Clean & Map Fields
-        asset_type = txn.get("asset_type", "").strip("[]").strip() or None
-        txn_type_map = {"P": "Purchase", "S": "Sale", "E": "Exchange"}
-        raw_txn_type = str(txn.get("transaction_type", "")).upper()
-        transaction_type = txn_type_map.get(raw_txn_type, raw_txn_type) or None
-
-        # 4. Build DB Row Dict
-        row = {
-            "doc_id": doc_id,
-            "filer_name": filer_name,
-            "ticker": txn.get("ticker"),
-            "asset_type": asset_type,
-            "transaction_type": transaction_type,
-            "trade_date": txn.get("transaction_date"),  # Python date objects work natively with most DB drivers
-            "amount_range": amount_range_str,
-            "amount_min": amount_min,
-            "amount_max": amount_max,
-            "estimated_cost": estimated_cost,
-            "quantity": quantity,
-            "current_price": None,    # Updated via your endpoint later
-            "price_change_pct": None  # Updated via your endpoint later
-        }
-        rows.append(row)
-
-    return rows
-
-async def successfull_extraction_save(doc_id: str, content: Dict[str, Any], doc_size: Optional[int], document_service, neo4j_service):
-    update = { 'doc_id_parsed': True, 'processed_status': "SUCCESS", 
-            "last_updated_date": datetime.now(), "last_updated_date": datetime.now(), 'doc_size': doc_size}
-    await document_service.update_extractions(doc_id, update)
-    await neo4j_service.ingest_filing(content)
-
-async def failed_extraction(doc_id: str, document_service):
-    update = { 'doc_id_parsed': False, 'processed_status': "FAILED", 
-            "last_updated_date": datetime.now(), "last_updated_date": datetime.now()}
-    await document_service.update_extractions(doc_id, update)
 
 async def main():
     await postgres_db.connect()
@@ -278,7 +152,7 @@ async def main():
                 try:
                 
                     await rabbitmq_client.consume(
-                        queue_name="worker-1",
+                        queue_name="worker-2",
                         callback=process_document_task,
                         prefetch_count=1,
                         auto_ack=False,

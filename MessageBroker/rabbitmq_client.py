@@ -115,7 +115,6 @@ class RabbitMQClient:
             # Only call get_exchange if a custom name is provided
             exchange = await self.channel.get_exchange(exchange_name)
         
-        
         msg = Message(
             body,
             content_type=content_type,
@@ -133,7 +132,9 @@ class RabbitMQClient:
         queue_name: str,
         callback: Callable,
         auto_ack: bool = False,
-        prefetch_count: int = 1
+        prefetch_count: int = 1,
+        postgres_session: Any = None,
+        neo4j_session: Any = None
     ) -> None:
         """
         Consume messages from a queue
@@ -150,26 +151,25 @@ class RabbitMQClient:
         await self.channel.set_qos(prefetch_count=prefetch_count)
         
         async def on_message(message: aio_pika.IncomingMessage):
-            async with message.process(ignore_processed=auto_ack):
-                try:
-                    # Parse message based on content type
-                    if message.content_type == "application/json":
-                        
-                        body = json.loads(message.body.decode())
-                    else:
-                        body = message.body.decode()
+            try:
+                if message.content_type == "application/json":
+                    body = json.loads(message.body.decode())
+                else:
+                    body = message.body.decode()
+                
+                # Pass the sessions or services here
+                result = await callback(body, message, postgres_session, neo4j_session)
+                
+                if result is False or result is None:
+                    await message.reject(requeue=True)
+                else:
+                    await message.ack()
                     
-                    # Call user callback
-                    result = await callback(body, message)
-                    
-                    # If callback returns True, we manually ack
-                    if result is False:
-                        await message.nack(requeue=True)
-                    else:
-                        await message.ack()
-                        
-                except Exception as e:
-                    logger.error(f"Error processing message from {queue_name}: {e}")
+            except Exception as e:
+                logger.error(f"Callback failed: {e}")
+                # Crucial: nack the message so it doesn't get stuck in 'Unacked' state
+                if not message.processed:
+                    await message.nack(requeue=True)
         
         await queue.consume(on_message)
         logger.info(f"Started consuming from queue: {queue_name}")

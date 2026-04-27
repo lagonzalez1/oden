@@ -4,11 +4,11 @@ domain-specific service and repo when you extend the project.
 """
 from typing import Any
 from fastapi import APIRouter, HTTPException, Query, status, UploadFile, File
-from Core.dependencies import Neo4jDep, PostgresDep
+from Core.dependencies import Neo4jDep, UoWDep, PostgresDep
 from Repository.documents_repository import DocumentRepository
 from MessageBroker import rabbitmq_client
 from Repository.graph_repository import Neo4jRepository
-from Service.document_service import BaseService
+from Service.document_service import DocumentsService
 from Schema.base_schema import DocumentUpdateRequest
 router = APIRouter()
 
@@ -41,21 +41,16 @@ async def scan_documents(
     filing_year: int | None = None,
     state_dst: str | None = None
 ):
-    """
-    Performs a scan of the documents table with optional pagination and filtering.
-    """
+    """ Performs a scan of the documents table with optional pagination and filtering. """
     repo = _postgres_service(session, "documents", "oden", "doc_id")
     
-    # Prepare filters for the get_table method
     filters = {}
     if filing_year:
         filters["filing_year"] = filing_year
     if state_dst:
         filters["state_dst"] = state_dst
 
-    # get_table is inherited from your PostgresRepository
     rows = await repo.get_table(limit=224, offset=1, **filters)
-    
     return {
         "count": len(rows),
         "limit": limit,
@@ -65,21 +60,22 @@ async def scan_documents(
 
 @doc_router.post("/update_data_test", summary="Update data given id")
 async def update_data(
-    session: PostgresDep,
+    uow: UoWDep,
     update: DocumentUpdateRequest
 ):
     """ Performs a scan of the documents table with optional pagination and filtering. """
     dict_data = update.update_data.model_dump(exclude_none=True) if update.update_data else {}
     repo = _postgres_service(session, "documents", "oden", "doc_id")
+    service = DocumentsService(uow)
     # get_table is inherited from your PostgresRepository
-    rows = await repo.update(update.doc_id, dict_data)
+    rows = await service.update(update.doc_id, dict_data)
     return {
         "update": rows,
     }
 
 @doc_router.post("/upload_csv", status_code=status.HTTP_201_CREATED)
 async def upload_documents_csv(
-    session: PostgresDep,
+    uow: UoWDep,
     file: UploadFile = File(...)
 ):
     """ Upload a CSV file to populate the documents table. """
@@ -88,8 +84,8 @@ async def upload_documents_csv(
             status_code=400, 
             detail="Invalid file extension. Please upload a .csv file."
         )
-    repo = _postgres_service(session, "documents", "oden", "doc_id")
-    service = BaseService(repo)
+    ##repo = _postgres_service(session, "documents", "oden", "doc_id")
+    service = DocumentsService(uow)
     try:
         count = await service.process_document_csv(file)
         return {
@@ -104,16 +100,35 @@ async def upload_documents_csv(
             detail=f"Error processing CSV: {str(e)}"
         )
 
+
+@doc_router.post("/natural_language_query", status_code=status.HTTP_201_CREATED)
+async def upload_documents_csv(
+    uow: UoWDep,
+    question: str = None
+):
+    """ Natural language query, sends message to queue. """
+    service = DocumentsService(uow)
+    try:
+        response = await service.natural_language_query(question)
+        return { 'response': response }
+    except Exception as e:
+        # In a real app, you'd log this error
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Error processing CSV: {str(e)}"
+        )
+
+
+
+
+
 @doc_router.post("/doc_id_check", summary="Check unprocessesed doc_ids, send to queue to process.", status_code=status.HTTP_201_CREATED)
 async def doc_id_check(
-    session: PostgresDep,
+    uow: UoWDep,
 ):
     """ Get unprocesses documents, simple Boolean check for now, but in the future date check will work best. """
-    repo = _postgres_service(session, "documents", "oden", "doc_id")
-    service = BaseService(repo)
-    rows, count = await repo.get_table(300, 0, filters={"doc_id_parsed": False}), 0
-    if rows:
-        count = await service.process_unprocessed_documents(rows)
+    service = DocumentsService(uow)
+    count = await service.process_unprocessed_documents()
     return {
         "messages_in_queue": count,
     }
@@ -143,7 +158,7 @@ async def get_node(label: str, node_id: str, session: Neo4jDep):
     return node
 
 
-@neo4j_router.post("/", status_code=status.HTTP_201_CREATED, summary="Create a node")
+@neo4j_router.post("/delete_all", status_code=status.HTTP_201_CREATED, summary="Create a node")
 async def create_node(label: str, payload: dict[str, Any], session: Neo4jDep):
     svc = _neo4j_service(session, label)
     return await svc.create(payload)

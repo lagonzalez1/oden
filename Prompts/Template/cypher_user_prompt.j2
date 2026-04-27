@@ -1,0 +1,27 @@
+{# ── Runtime context injected at query time ──────────────── #}
+{% if filters is defined and filters %}
+ACTIVE FILTERS:
+{% for key, value in filters.items() %}
+  - {{ key }}: {{ value }}
+{% endfor %}
+
+{% endif %}
+{# ── Intent hint passed from application layer ───────────── #}
+{% if query_intent is defined %}
+QUERY INTENT: {{ query_intent }}
+{% endif %}
+
+NATURAL LANGUAGE QUERY:
+{{ natural_language_query }}
+
+{# ── Output instruction ───────────────────────────────────── #}
+Return ONLY a valid Cypher query string with parameterised values.
+Also return a separate JSON object called `params` containing all parameter values.
+
+Output format must be exactly:
+{
+  "cypher": "<your cypher query here>",
+  "params": {
+    "<param_name>": <param_value>
+  }
+}

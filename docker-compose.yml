@@ -123,6 +123,34 @@ services:
     networks:
       - app_network
 
+  query-processor:
+    build:
+      context: .
+      dockerfile: workers/query_processor/Dockerfile
+    environment:
+      - PYTHONPATH=/:/app:/Config:/Database:/:Repository/:Core/:Schema/:Prompts/:LLM
+    depends_on:
+      postgres:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - ./Config:/Config
+      - ./Core:/Core
+      - ./MessageBroker:/MessageBroker
+      - ./Schema:/Schema
+      - ./Repository:/Repository
+      - ./LLM:/LLM
+      - ./Service:/Service
+      - ./Database:/Database
+      - ./Prompts:/Prompts
+      - ./workers/query_processor:/app
+    restart: unless-stopped
+    networks:
+      - app_network
+
 volumes:
   postgres_data:
   neo4j_data:

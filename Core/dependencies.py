@@ -3,9 +3,10 @@ from typing import Annotated, AsyncGenerator
 from fastapi import Depends
 from neo4j import AsyncSession as Neo4jSession
 from sqlalchemy.ext.asyncio import AsyncSession
-
+from Core.SqlAlchemyUnitOfWork import SqlAlchemyUnitOfWork
 from Database.neo4j_ import neo4j_db
 from Database.postgres import postgres_db
+from Core.unit_of_work import AbstractUnitOfWork
 
 
 # ── PostgreSQL ────────────────────────────────────────────────────────────────
@@ -17,6 +18,14 @@ async def get_postgres_session() -> AsyncGenerator[AsyncSession, None]:
 
 
 PostgresDep = Annotated[AsyncSession, Depends(get_postgres_session)]
+
+
+async def get_uow(session: PostgresDep) -> AsyncGenerator[SqlAlchemyUnitOfWork, None]:
+    """Provides a Unit of Work to the FastAPI route."""
+    yield SqlAlchemyUnitOfWork(session)
+
+# Define a clean type alias for your routes
+UoWDep = Annotated[AbstractUnitOfWork, Depends(get_uow)]
 
 
 # ── Neo4j ─────────────────────────────────────────────────────────────────────
