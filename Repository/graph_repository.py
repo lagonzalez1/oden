@@ -203,6 +203,14 @@ class TransactionRepository(Neo4jRepository):
             strike=metadata.get("strike_price"),
             expiry=tx["transaction_date"]
         )
+
+    def parse_date(self, date_str):
+        for fmt in ["%m-%d-%Y", "%m/%d/%Y"]:
+            try:
+                return datetime.strptime(date_str.strip(), fmt)
+            except ValueError:
+                continue
+        return None
     
     # ── Transaction (The Event) ──────────────────────────────────────────────
     async def create_transaction(self, tx: Dict[str, Any], filer_name: str, filing_id: str) -> str:
@@ -210,7 +218,9 @@ class TransactionRepository(Neo4jRepository):
         if tx and tx.get("ticker") is None:
             return
         tx_id = str(uuid.uuid4())
-        date_obj = datetime.strptime(tx["transaction_date"], "%m-%d-%Y")
+        date_obj = self.parse_date(tx["transaction_date"])
+        if date_obj is None:
+            return 
         formatted_date = date_obj.strftime("%Y-%m-%d")
         cypher = """
         MATCH (p:Person {name: $filer_name})
