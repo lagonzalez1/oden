@@ -9,7 +9,7 @@ from Repository.documents_repository import DocumentRepository
 from MessageBroker import rabbitmq_client
 from Repository.graph_repository import Neo4jRepository
 from Service.document_service import DocumentsService
-from Schema.base_schema import DocumentUpdateRequest
+from Schema.base_schema import DocumentUpdateRequest, IngestRequest
 router = APIRouter()
 
 
@@ -50,7 +50,7 @@ async def scan_documents(
     if state_dst:
         filters["state_dst"] = state_dst
 
-    rows = await repo.get_table(limit=224, offset=1, **filters)
+    rows = await repo.get_table(**filters)
     return {
         "count": len(rows),
         "limit": limit,
@@ -87,7 +87,7 @@ async def upload_documents_csv(
     ##repo = _postgres_service(session, "documents", "oden", "doc_id")
     service = DocumentsService(uow)
     try:
-        count = await service.process_document_csv(file)
+        count = await service.process_document_csv(file=file)
         return {
             "message": "CSV processed successfully",
             "rows_inserted": count,
@@ -100,6 +100,30 @@ async def upload_documents_csv(
             detail=f"Error processing CSV: {str(e)}"
         )
 
+
+@doc_router.post("/ingest_documents", summary="Check unprocessesed doc_ids, send to queue to process.", status_code=status.HTTP_201_CREATED)
+async def ingest_documents(
+    uow: UoWDep,
+    request: IngestRequest
+):
+    """ Get unprocesses documents, simple Boolean check for now, but in the future date check will work best. """
+    service = DocumentsService(uow)
+    count = await service.ingest_documents(year=request.year)
+    return {
+        "messages_in_queue": count,
+    }
+
+@doc_router.post("/monitor_changes", summary="Monitor changes in your db", status_code=status.HTTP_201_CREATED)
+async def doc_id_check(
+    uow: UoWDep,
+    year: str
+):
+    """ Get unprocesses documents, simple Boolean check for now, but in the future date check will work best. """
+    service = DocumentsService(uow)
+    count = await service.process_unprocessed_documents()
+    return {
+        "messages_in_queue": count,
+    }
 
 @doc_router.post("/natural_language_query", status_code=status.HTTP_201_CREATED)
 async def upload_documents_csv(
@@ -117,21 +141,6 @@ async def upload_documents_csv(
             status_code=500, 
             detail=f"Error processing CSV: {str(e)}"
         )
-
-
-
-
-
-@doc_router.post("/doc_id_check", summary="Check unprocessesed doc_ids, send to queue to process.", status_code=status.HTTP_201_CREATED)
-async def doc_id_check(
-    uow: UoWDep,
-):
-    """ Get unprocesses documents, simple Boolean check for now, but in the future date check will work best. """
-    service = DocumentsService(uow)
-    count = await service.process_unprocessed_documents()
-    return {
-        "messages_in_queue": count,
-    }
 
 # ── Neo4j example routes ──────────────────────────────────────────────────────
 

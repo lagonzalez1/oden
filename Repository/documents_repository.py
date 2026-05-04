@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Any, Generic, Sequence, TypeVar, Dict
 from sqlalchemy import text
+import sqlalchemy
 from sqlalchemy.ext.asyncio import AsyncSession
 from contextlib import asynccontextmanager
 import logging
@@ -103,7 +104,7 @@ class PostgresRepository(AbstractRepository[T]):
             columns = ", ".join(data.keys())
             values = ", ".join(f":{k}" for k in data.keys())
             query = text(
-                f"INSERT INTO {self.full_table_name} ({columns}) VALUES ({values}) RETURNING *"
+                f"INSERT INTO {self.full_table_name} ({columns}) VALUES ({values}) ON CONFLICT (doc_id) DO NOTHING RETURNING *"
             )
             result = await self._session.execute(query, data)
             return result.mappings().first()

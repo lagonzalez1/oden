@@ -19,3 +19,6 @@ pymupdf
 requests
 jinja2
 ollama
+pandas
+httpx
+lxml

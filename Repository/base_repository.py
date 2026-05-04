@@ -50,14 +50,12 @@ class PostgresRepository(AbstractRepository[T]):
     def __init__(self, session: AsyncSession):
         self._session = session
 
-    async def get_table(self, limit: int = 100, offset: int = 0, **filters) -> Sequence[Any]:
+    async def get_table(self, **filters) -> Sequence[Any]:
         """
         Fetch all rows from `table_name`, with optional key=value filters.
         Replace with SQLAlchemy ORM / select() calls in your subclass.
         """
         where_clause = ""
-        params: dict[str, Any] = {"limit": limit, "offset": offset}
-
         if filters:
             conditions = " AND ".join(f"{k} = :{k}" for k in filters)
             where_clause = f"WHERE {conditions}"
@@ -65,7 +63,6 @@ class PostgresRepository(AbstractRepository[T]):
 
         query = text(
             f"SELECT * FROM {self.table_name} {where_clause} "
-            f"LIMIT :limit OFFSET :offset"
         )
         result = await self._session.execute(query, params)
         return result.mappings().all()

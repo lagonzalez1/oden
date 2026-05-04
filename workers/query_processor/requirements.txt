@@ -22,3 +22,5 @@ jinja2
 pymupdf4llm
 ollama
 pillow
+pandas
+lxml

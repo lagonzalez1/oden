@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Generic, Sequence, TypeVar, Dict, List
 import uuid
 from neo4j import AsyncSession as Neo4jSession
+from datetime import datetime
 
 T = TypeVar("T")
 
@@ -200,7 +201,7 @@ class TransactionRepository(Neo4jRepository):
             tx_id=transaction_id,
             ticker=tx["ticker"],
             strike=metadata.get("strike_price"),
-            expiry=tx["transaction_date"] # Using trade date as proxy if expiry not explicit
+            expiry=tx["transaction_date"]
         )
     
     # ── Transaction (The Event) ──────────────────────────────────────────────
@@ -208,7 +209,9 @@ class TransactionRepository(Neo4jRepository):
         """Create the central Transaction node and connect to Filer and Asset."""
         if tx and tx.get("ticker") is None:
             return
-        tx_id = str(uuid.uuid4()) 
+        tx_id = str(uuid.uuid4())
+        date_obj = datetime.strptime(tx["transaction_date"], "%m-%d-%Y")
+        formatted_date = date_obj.strftime("%Y-%m-%d")
         cypher = """
         MATCH (p:Person {name: $filer_name})
         MATCH (a:Asset {ticker: $ticker})
@@ -232,7 +235,7 @@ class TransactionRepository(Neo4jRepository):
             tx_id=tx_id,
             filing_id=filing_id,
             type=tx["transaction_type"],
-            date=tx["transaction_date"],
+            date=formatted_date,
             amount=tx["amount_range"],
             desc=tx.get("description")
         )

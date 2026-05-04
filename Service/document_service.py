@@ -5,10 +5,13 @@ from datetime import datetime
 from fastapi import UploadFile
 from Repository.documents_repository import AbstractRepository
 from Core.unit_of_work import AbstractUnitOfWork
-from typing import Any, Generic, Sequence, TypeVar, List, Dict
+from typing import Any, Generic, Sequence, TypeVar, List, Dict, Optional
 from MessageBroker.rabbitmq_client import rabbitmq_client
 import logging
-
+import zipfile
+import requests
+import httpx
+import pandas as pd
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -88,40 +91,46 @@ class DocumentsService:
             logger.error(f"[Document Service] Update failed for {id}: {e}")
             raise e
 
-    async def process_document_csv(self, file: UploadFile) -> int:
+    async def process_document_csv(self, file: Optional[UploadFile] = None, df :Optional[pd.DataFrame] = None) -> int:
         """
         Parses a CSV file and saves rows to the PostgreSQL documents table.
         Returns the count of successfully processed rows.
         """
         saved_ids = []
-        # Read the file content
-        content = await file.read()
-        # Use io.StringIO to treat bytes as a file-like object for the CSV reader
-        csv_reader = csv.DictReader(io.StringIO(content.decode("utf-8")))
+        if file is not None:
+            content = await file.read()
+            csv_reader = csv.DictReader(io.StringIO(content.decode("utf-8")))
+        
+        if df is not None:
+            csv_reader = df.replace({float('nan'): None}).to_dict('records')
+        
         rows_added = 0
         async with self.uow:
             for row in csv_reader:
-                # 1. Map CSV columns to DB columns (Handling potential naming mismatches)
+                doc_id = row.get("DocID")
+                year_val = row.get("Year")
+                
                 db_data = {
-                    "doc_id": row.get("DocID"),
+                    "doc_id": str(doc_id) if doc_id is not None else None,
                     "prefix": row.get("Prefix"),
                     "first_name": row.get("First"),
                     "last_name": row.get("Last"),
                     "suffix": row.get("Suffix"),
                     "filing_type": row.get("FillingType"),
                     "state_dst": row.get("StateDst"),
-                    "filing_year": int(row.get("Year")) if row.get("Year") else None,
+                    "filing_year": int(year_val) if year_val and str(year_val).isdigit() else None,
                     "filing_date": row.get("FillingDate"),
-                    
-                    # 2. Add the metadata fields
                     "processed_date": datetime.now(),
                     "doc_id_parsed": False,
                     "last_updated_date": datetime.now(),
-                    "doc_size": 0 # Or calculate per row if needed
+                    "doc_size": 0
                 }
-                # Save id to array
-                saved_ids.append({'doc_id': row.get("DocID"), 'filing_year': int(row.get("Year")) if row.get("Year") else None})            
-                # 3. Save to database using the repository's create method
+                
+                saved_ids.append({
+                    'doc_id': str(doc_id) if doc_id is not None else None, 
+                    'filing_year': int(year_val) if year_val and str(year_val).isdigit() else None
+                })
+                
                 await self.uow.documents.create(db_data)
 
                 rows_added += 1
@@ -144,10 +153,34 @@ class DocumentsService:
             )
         return rows_added
 
+    async def ingest_documents(self, year: Optional[str])->bool:
+        try:
+            report_df = await self.download_reports(year=year)
+            inserted = await self.process_document_csv(file=None, df=report_df)
+            return inserted
+        except Exception as e:
+            logger.error(f"[Document ingest_documents] Download reports: {e}")
+            raise e
+
+    async def download_reports(self, year: Optional[str])->Optional[pd.DataFrame]:
+        try:
+            file = f"https://disclosures-clerk.house.gov/public_disc/financial-pdfs/{year}FD.zip"
+            logger.info(f"[download_reports] file url : {file}")
+            async with httpx.AsyncClient() as client:
+                r = await client.get(file)
+                open('file.zip', 'wb').write(r.content)
+                zipfile.ZipFile('file.zip').extractall("extract_folder")
+                df = pd.read_xml(f"extract_folder/{year}FD.xml")
+                return df
+        except Exception as e:
+            logger.error(f"[Document download_reports] Download reports: {e}")
+            raise e
+
+
     async def process_unprocessed_documents(self)->int:
         try:
             async with self.uow:
-                rows = await self.uow.documents.get_table(300, 0, filters={"doc_id_parsed": False})
+                rows = await self.uow.documents.get_table( filters={"doc_id_parsed": False, "processed_status": 'FAILED'})
                 await self.uow.commit()
                 count = 0
                 if rows:
