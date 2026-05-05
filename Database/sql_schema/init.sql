@@ -68,15 +68,27 @@ CREATE TABLE oden.stock_gains (
     -- Trade Details
     transaction_type VARCHAR(20) NOT NULL,
     trade_date DATE NOT NULL,
-    amount_range VARCHAR(100),
+    amount_range NUMERIC(14,2),
     amount_min NUMERIC(14,2),
     amount_max NUMERIC(14,2),
     estimated_cost NUMERIC(14,2),      
     quantity NUMERIC(14,4),            
     
     -- Performance Tracking
+    purchase_price NUMERIC(14,4),
     current_price NUMERIC(14,4),       
     price_change_pct NUMERIC(8,2),
+
+    benchmark_return_pct NUMERIC(8,2),
+    alpha_vs_benchmark NUMERIC(8,2),    
+    
+    -- Risk & Timing
+    max_drawdown_pct NUMERIC(8,2),      
+    days_to_peak INTEGER,               
+    
+    -- Conviction
+    is_initial_entry BOOLEAN,           
+    percent_of_total_holdings NUMERIC(5,2),
     
     -- Audit & Metadata
     created_at TIMESTAMPTZ DEFAULT NOW(),

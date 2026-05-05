@@ -25,9 +25,11 @@ from functools import wraps
 from Service.document_service import DocumentsService
 from Service.graph_service import BaseService as GraphService
 from Downloads.DownloadFile import DownloadFile 
+from YFinance.ProcessFinancials import ProcessFinancials
 from Database.postgres import postgres_db
 from Database.neo4j_ import neo4j_db
 import io
+import uuid
 from PIL import Image
 import base64
 
@@ -174,6 +176,9 @@ async def process_document_task(body, message: aio_pika.IncomingMessage, postgre
             if text:
                 content = await extract_llm_content_with_fallback(content=None, text_content=text)
                 if content:
+                    row = content.get("transactions", [])
+                    txs = [{**trades, "id": str(uuid.uuid4())} for trades in row]
+                    content['transactions'] = txs
                     await successfull_extraction_save(doc_id, content, len(text), document_service, neo4j_service)
                     return True
 
@@ -184,72 +189,21 @@ async def process_document_task(body, message: aio_pika.IncomingMessage, postgre
         return False
 
 
-def stock_content(filing_extraction: Dict[str, Any], doc_id: str) -> List[Dict[str, Any]]:
-    rows = []
-    filer_name = filing_extraction.get("name")
-    transactions = filing_extraction.get("transactions", [])
-
-    for txn in transactions:
-        # 1. Parse Amount Range / Cost
-        raw_amount = txn.get("amount_range")
-        amount_min: Optional[float] = None
-        amount_max: Optional[float] = None
-        estimated_cost: Optional[float] = None
-        amount_range_str: Optional[str] = str(raw_amount) if raw_amount is not None else None
-
-        if isinstance(raw_amount, (int, float)):
-            estimated_cost = float(raw_amount)
-        elif isinstance(raw_amount, str):
-            # Clean currency symbols & commas, then parse range if present
-            cleaned = re.sub(r'[^\d.\-]', '', raw_amount)
-            if '-' in cleaned:
-                try:
-                    parts = cleaned.split('-')
-                    amount_min = float(parts[0])
-                    amount_max = float(parts[1])
-                    estimated_cost = (amount_min + amount_max) / 2.0
-                except ValueError:
-                    pass
-            else:
-                try:
-                    estimated_cost = float(cleaned)
-                except ValueError:
-                    pass
-
-        # 2. Extract Quantity from Metadata
-        metadata = txn.get("metadata") or {}
-        quantity_val = metadata.get("share_count") or metadata.get("quantity") or metadata.get("num_shares")
-        quantity = float(quantity_val) if quantity_val is not None else None
-
-        # 3. Clean & Map Fields
-        asset_type = txn.get("asset_type", "").strip("[]").strip() or None
-        txn_type_map = {"P": "Purchase", "S": "Sale", "E": "Exchange"}
-        raw_txn_type = str(txn.get("transaction_type", "")).upper()
-        transaction_type = txn_type_map.get(raw_txn_type, raw_txn_type) or None
-
-        # 4. Build DB Row Dict
-        row = {
-            "doc_id": doc_id,
-            "filer_name": filer_name,
-            "ticker": txn.get("ticker"),
-            "asset_type": asset_type,
-            "transaction_type": transaction_type,
-            "trade_date": txn.get("transaction_date"),  # Python date objects work natively with most DB drivers
-            "amount_range": amount_range_str,
-            "amount_min": amount_min,
-            "amount_max": amount_max,
-            "estimated_cost": estimated_cost,
-            "quantity": quantity,
-            "current_price": None,    # Updated via your endpoint later
-            "price_change_pct": None  # Updated via your endpoint later
-        }
-        rows.append(row)
-
-    return rows
+async def transactions_parsed(content: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
+    """Process a filing and calculate financial performance."""
+    processor = ProcessFinancials(content)
+    return await processor.process_row()
 
 async def successfull_extraction_save(doc_id: str, content: Dict[str, Any], doc_size: Optional[int], document_service, neo4j_service):
     update = { 'doc_id_parsed': True, 'processed_status': "SUCCESS", 
             "last_updated_date": datetime.now(), "last_updated_date": datetime.now(), 'doc_size': doc_size}
+    logger.info(f"[successfull_extraction_save] content: {content}")
+    tx = await transactions_parsed(content)
+
+    logger.info(f"[transactions_parsed] response {tx}")
+    if tx is not None:
+        await document_service.create_transaction_gains(data=tx)
+
     await document_service.update_extractions(doc_id, update)
     await neo4j_service.ingest_filing(content)
 
@@ -267,7 +221,8 @@ async def main():
         port=settings.RABBITMQ_PORT,
         username=settings.RABBITMQ_USER,
         password=settings.RABBITMQ_PASSWORD,
-        virtual_host=settings.RABBITMQ_VHOST
+        virtual_host=settings.RABBITMQ_VHOST,
+        heartbeat=settings.RABBITMQ_HEARTBEAT
     )
     rabbitmq_client.config = config
     

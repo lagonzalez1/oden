@@ -20,6 +20,10 @@ class AppBaseModel(BaseModel):
 class IngestRequest(BaseModel):
     year: Optional[str] = None
 
+
+class MonitorChangesRequest(BaseModel):
+    year: Optional[str] = None
+
 class UpdateData(BaseModel):
     doc_id_parsed: Optional[bool] = None
     doc_size: Optional[int] = None

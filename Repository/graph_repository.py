@@ -223,20 +223,20 @@ class TransactionRepository(Neo4jRepository):
             return 
         formatted_date = date_obj.strftime("%Y-%m-%d")
         cypher = """
-        MATCH (p:Person {name: $filer_name})
-        MATCH (a:Asset {ticker: $ticker})
-        CREATE (t:Transaction {
-            id: $tx_id,
-            doc_id: $filing_id,
-            type: $type,
-            trade_date: date($date),
-            amount_range: $amount,
-            description: $desc,
-            created_at: datetime()
-        })
-        CREATE (p)-[:EXECUTED]->(t)
-        CREATE (t)-[:INVOLVES]->(a)
-        RETURN t.id as transaction_id
+            MERGE (p:Person {name: $filer_name})
+            MERGE (a:Asset {ticker: $ticker})
+            CREATE (t:Transaction {
+                id: $tx_id,
+                doc_id: $filing_id,
+                type: $type,
+                trade_date: date($date),
+                amount_range: $amount,
+                description: $desc,
+                created_at: datetime()
+            })
+            CREATE (p)-[:EXECUTED]->(t)
+            CREATE (t)-[:INVOLVES]->(a)
+            RETURN t.id as transaction_id
         """
         result = await self._session.run(
             query=cypher,
@@ -250,7 +250,7 @@ class TransactionRepository(Neo4jRepository):
             desc=tx.get("description")
         )
         record = await result.single()
-        return record["transaction_id"]
+        return record["transaction_id"] if record else None
 
     # ── Orchestrator ──────────────────────────────────────────────────────────
 

@@ -9,7 +9,7 @@ from Repository.documents_repository import DocumentRepository
 from MessageBroker import rabbitmq_client
 from Repository.graph_repository import Neo4jRepository
 from Service.document_service import DocumentsService
-from Schema.base_schema import DocumentUpdateRequest, IngestRequest
+from Schema.base_schema import DocumentUpdateRequest, IngestRequest, MonitorChangesRequest
 router = APIRouter()
 
 
@@ -116,11 +116,11 @@ async def ingest_documents(
 @doc_router.post("/monitor_changes", summary="Monitor changes in your db", status_code=status.HTTP_201_CREATED)
 async def doc_id_check(
     uow: UoWDep,
-    year: str
+    request: MonitorChangesRequest
 ):
     """ Get unprocesses documents, simple Boolean check for now, but in the future date check will work best. """
     service = DocumentsService(uow)
-    count = await service.process_unprocessed_documents()
+    count = await service.process_unprocessed_documents(year=int(request.year))
     return {
         "messages_in_queue": count,
     }

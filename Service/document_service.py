@@ -177,14 +177,16 @@ class DocumentsService:
             raise e
 
 
-    async def process_unprocessed_documents(self)->int:
+    async def process_unprocessed_documents(self, year: int)->int:
         try:
             async with self.uow:
-                rows = await self.uow.documents.get_table( filters={"doc_id_parsed": False, "processed_status": 'FAILED'})
+                rows = await self.uow.documents.get_table(
+                    filters={"doc_id_parsed": False, 'filing_year': year}
+                )
                 await self.uow.commit()
                 count = 0
                 if rows:
-                    for i in range(rows):
+                    for i in range(len(rows)):
                         item = rows[i]
                         message = {
                             "doc_id": item['doc_id'],
@@ -228,7 +230,25 @@ class DocumentsService:
             logger.error(f"[Document Service] Update failed for {record_id}: {e}")
             raise e
 
-    
+    async def create_transaction_gains(self, data: List[Dict[str, Any]]) -> int | None:
+        """Insert transaction gain rows and return the count of successful inserts."""
+        try:
+            update_count = 0
+
+            async with self.uow:
+                for row in data:
+                    updated_record = await self.uow.stocks.create(row)
+
+                    if updated_record is not None:
+                        await self.uow.commit()
+                        update_count += 1
+
+            return update_count if update_count > 0 else None
+
+        except Exception as e:
+            logger.error(f"[Document Service] create_transaction_gains: {e}")
+            raise
+
     async def delete(self, record_id: Any) -> bool:
         """Delete a record; returns True if it existed."""
         return await self.self.uow.documents.delete(record_id)

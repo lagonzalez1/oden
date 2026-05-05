@@ -35,7 +35,9 @@ class LocalModel:
                 "format": schema,
                 "options": {
                     "temperature": self.prompt_data.get("temperature", 0.7),
+                    "num_ctx": 4096,
                 },
+                "keep_alive": "5m",
             }
 
             response = requests.post(

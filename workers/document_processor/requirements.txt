@@ -24,3 +24,4 @@ ollama
 pillow
 pandas
 lxml
+yfinance

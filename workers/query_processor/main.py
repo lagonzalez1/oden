@@ -11,7 +11,7 @@ from MessageBroker.rabbitmq_client import RabbitMQConfig, rabbitmq_client
 from Config.settings import settings
 import aio_pika
 from Prompts.Builder import PromptBuilder, PromptConfig
-from LLM.DocumentValidator import FilingExtraction
+from LLM.CypherResponse import CypherResponse
 from LLM.LocalModel import LocalModel
 from Core.dependencies import PostgresDep, Neo4jDep
 from Repository.documents_repository import DocumentRepository
@@ -37,8 +37,8 @@ def _postgres_service(session: Any)->DocumentsService:
     return DocumentsService(uow)
 
 def _neo4j_service(session: Any) -> GraphService:
-    neo4j_repository = TransactionRepository(session)
-    return GraphService(neo4j_repository)
+    uow = TransactionRepository(session)
+    return GraphService(uow)
 
 def retry(max_retries=3, base_delay=1, exponential_base=2):
     """ Retry decorator with exponential backoff """
@@ -67,7 +67,7 @@ def retry(max_retries=3, base_delay=1, exponential_base=2):
 async def process_text_llm(text: Optional[str])->Optional[Dict]:
     """Extract LLM content with retry on validation errors"""
     prompt_config = PromptConfig(
-        template_name="cypher_system_prompt",
+        template_name="cypher_user_prompt",
         system_template_name="cypher_system_prompt",
         system_variables={
             "dummy_key": None,
@@ -77,11 +77,11 @@ async def process_text_llm(text: Optional[str])->Optional[Dict]:
             "natural_language_query": text,
         },
         max_tokens=80000,
-        temperature=0,
+        temperature=0.2,
     )
     
     prompt_data = builder.build(prompt_config)
-    model = LocalModel(FilingExtraction, prompt_data)
+    model = LocalModel(CypherResponse, prompt_data)
     response = model._invoke_model()
     # Add validation check here if needed
     if not response or not isinstance(response, dict):
@@ -120,8 +120,8 @@ async def process_document_task(body, message: aio_pika.IncomingMessage, postgre
         if question:
             content = await extract_llm_content_with_fallback(text_content=question)
             if content:
-                data = {'response': content.cypher, 'params': content.params, 'updated_at': datetime.now()}
-                await document_service.update_query_request(id, data)
+                data = {'response': content.get("cypher"), 'params': json.dumps(content.get("params")), 'updated_at': datetime.now()}
+                await document_service.update_query_request(_id, data)
                 return True
             else:
                 return False

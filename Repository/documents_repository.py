@@ -104,7 +104,7 @@ class PostgresRepository(AbstractRepository[T]):
             columns = ", ".join(data.keys())
             values = ", ".join(f":{k}" for k in data.keys())
             query = text(
-                f"INSERT INTO {self.full_table_name} ({columns}) VALUES ({values}) ON CONFLICT (doc_id) DO NOTHING RETURNING *"
+                f"INSERT INTO {self.full_table_name} ({columns}) VALUES ({values}) ON CONFLICT ({self.pk_name}) DO NOTHING RETURNING *"
             )
             result = await self._session.execute(query, data)
             return result.mappings().first()
@@ -155,3 +155,6 @@ class DocumentRepository(PostgresRepository):
         query = text(f"SELECT * FROM {self.full_table_name} WHERE filing_year = :year")
         result = await self._session.execute(query, {"year": year})
         return result.mappings().all()
+
+
+
