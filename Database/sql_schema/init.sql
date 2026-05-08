@@ -44,7 +44,6 @@ CREATE TABLE IF NOT EXISTS market_data.stock_news (
     source_url TEXT,
     published_date TIMESTAMPTZ NOT NULL,
     ingested_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-
     -- Prevents duplicate entries from multiple API calls
     CONSTRAINT unique_ticker_news UNIQUE (ticker, headline, published_date)
 );
@@ -58,13 +57,11 @@ ON market_data.stock_news (ticker, published_date DESC);
 -- Table to store gains based on document
 CREATE TABLE oden.stock_gains (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    
     -- Filing & Entity Tracking
     doc_id VARCHAR(50) NOT NULL,
     filer_name VARCHAR(255) NOT NULL,
     ticker VARCHAR(10) NOT NULL,
     asset_type VARCHAR(50),
-    
     -- Trade Details
     transaction_type VARCHAR(20) NOT NULL,
     trade_date DATE NOT NULL,

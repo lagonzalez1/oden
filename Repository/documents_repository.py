@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, Generic, Sequence, TypeVar, Dict
+from typing import Any, Generic, Sequence, TypeVar, Dict, List
 from sqlalchemy import text
 import sqlalchemy
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -90,14 +90,19 @@ class PostgresRepository(AbstractRepository[T]):
             f"SELECT * FROM {self.full_table_name} {where_clause} "
             f"LIMIT :limit OFFSET :offset"
         )
-        print(query)
         result = await self._session.execute(query, params)
         return result.mappings().all()
+
 
     async def get_by_id(self, record_id: Any) -> Any | None:
         query = text(f"SELECT * FROM {self.full_table_name} WHERE {self.pk_name} = :id")
         result = await self._session.execute(query, {"id": record_id})
         return result.mappings().first()
+
+    async def get_by_ids(self, ids: List[Any]) -> Any | None:
+        query = text(f"SELECT * FROM {self.full_table_name} WHERE {self.pk_name} = ANY(:ids)")
+        results = await self._session.execute(query, {"ids": ids})
+        return results.mappings().all()
 
     async def create(self, data: dict[str, Any]) -> Any:
         try:
@@ -158,3 +163,50 @@ class DocumentRepository(PostgresRepository):
 
 
 
+class StockRepository(PostgresRepository):
+    table_name = "stock_gains"
+    schema_name = "oden"
+    pk_name = "id"
+
+    async def get_distinct_clients(self):
+        query = text(f"SELECT DISTINCT filer_name FROM {self.full_table_name}")
+        result = await self._session.execute(query)
+        return result.mappings().all()
+
+    async def get_by_doc_id(
+        self,
+        doc_id: str,
+        limit: int = 100,
+        offset: int = 0
+    ) -> List[Any]:
+        query = text(f"""
+            SELECT * FROM {self.full_table_name}
+            WHERE doc_id = :doc_id
+            ORDER BY trade_date DESC
+            LIMIT :limit OFFSET :offset
+        """)
+        result = await self._session.execute(query, {
+            "doc_id": doc_id,
+            "limit":  limit,
+            "offset": offset
+        })
+        return result.mappings().all()
+
+    async def get_by_name(
+        self,
+        filer_name: str,
+        limit: int = 100,
+        offset: int = 0
+    ) -> List[Any]:
+        query = text(f"""
+            SELECT * FROM {self.full_table_name}
+            WHERE filer_name ILIKE :filer_name
+            ORDER BY trade_date DESC
+            LIMIT :limit OFFSET :offset
+        """)
+        result = await self._session.execute(query, {
+            "filer_name": f"%{filer_name}%",
+            "limit":      limit,
+            "offset":     offset
+        })
+        return result.mappings().all()

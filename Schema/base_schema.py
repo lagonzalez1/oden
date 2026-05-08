@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Optional, List
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, field_validator
@@ -37,6 +37,11 @@ class DocumentUpdateRequest(BaseModel):
     def validate_doc_id(cls, v):
         return f"{v}" 
 
+class GetAssociatedTransactions(BaseModel):
+    doc_ids: List[str]
+
+class GetPerformanceRequest(BaseModel):
+    filer_name: Optional[str] = None
 
 
 # ── Generic record schemas ─────────────────────────────────────────────────────

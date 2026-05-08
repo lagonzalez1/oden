@@ -9,7 +9,8 @@ from Repository.documents_repository import DocumentRepository
 from MessageBroker import rabbitmq_client
 from Repository.graph_repository import Neo4jRepository
 from Service.document_service import DocumentsService
-from Schema.base_schema import DocumentUpdateRequest, IngestRequest, MonitorChangesRequest
+from Service.stock_gain_service import StockGainsService
+from Schema.base_schema import DocumentUpdateRequest, IngestRequest, MonitorChangesRequest, GetAssociatedTransactions, GetPerformanceRequest
 router = APIRouter()
 
 
@@ -142,6 +143,61 @@ async def upload_documents_csv(
             detail=f"Error processing CSV: {str(e)}"
         )
 
+@doc_router.post("/get_associated_transactions")
+async def upload_documents_csv(
+    uow: UoWDep,
+    request: GetAssociatedTransactions
+):
+    """ Natural language query, sends message to queue. """
+    service = StockGainsService(uow)
+    try:
+        response = await service.get_associated_transactions(request)
+        return { 'response': response }
+    except Exception as e:
+        # In a real app, you'd log this error
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Error processing: {str(e)}"
+        )
+
+@doc_router.get("/get_clients")
+async def get_clients(
+    uow: UoWDep,
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+):
+    """ Natural language query, sends message to queue. """
+    service = StockGainsService(uow)
+    try:
+        response = await service.get_clients()
+        return { 'response': response }
+    except Exception as e:
+        # In a real app, you'd log this error
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Error processing CSV: {str(e)}"
+        )
+
+@doc_router.get("/get_client_performance")
+async def get_client_performance(
+    uow: UoWDep,
+    filer_name: str = Query(..., description="Name of the filer"),
+):
+    """ Natural language query, sends message to queue. """
+    service = StockGainsService(uow)
+    try:
+        response = await service.get_client_performance(filer_name)
+        return { 'response': response }
+    except Exception as e:
+        # In a real app, you'd log this error
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Error processing CSV: {str(e)}"
+        )
+
+
+
+
 # ── Neo4j example routes ──────────────────────────────────────────────────────
 
 neo4j_router = APIRouter(prefix="/neo4j/{label}", tags=["Neo4j"])
@@ -166,28 +222,6 @@ async def get_node(label: str, node_id: str, session: Neo4jDep):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
     return node
 
-
-@neo4j_router.post("/delete_all", status_code=status.HTTP_201_CREATED, summary="Create a node")
-async def create_node(label: str, payload: dict[str, Any], session: Neo4jDep):
-    svc = _neo4j_service(session, label)
-    return await svc.create(payload)
-
-
-@neo4j_router.put("/{node_id}", summary="Update a node")
-async def update_node(label: str, node_id: str, payload: dict[str, Any], session: Neo4jDep):
-    svc = _neo4j_service(session, label)
-    node = await svc.update(node_id, payload)
-    if not node:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
-    return node
-
-
-@neo4j_router.delete("/{node_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Delete a node")
-async def delete_node(label: str, node_id: str, session: Neo4jDep):
-    svc = _neo4j_service(session, label)
-    deleted = await svc.delete(node_id)
-    if not deleted:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
 
 
 # ── Collect both routers ──────────────────────────────────────────────────────

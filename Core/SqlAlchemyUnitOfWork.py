@@ -1,5 +1,5 @@
 
-from Repository.documents_repository import PostgresRepository
+from Repository.documents_repository import PostgresRepository, StockRepository
 from Core.unit_of_work import AbstractUnitOfWork
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,7 +17,7 @@ class SqlAlchemyUnitOfWork(AbstractUnitOfWork):
         self.documents.pk_name = "doc_id"
 
         # Configuration for Stocks
-        self.stocks = PostgresRepository(self._session)
+        self.stocks = StockRepository(self._session)
         self.stocks.schema_name = "oden"
         self.stocks.table_name = "stock_gains"
         self.stocks.pk_name = "id"
