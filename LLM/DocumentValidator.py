@@ -21,7 +21,9 @@ class TransactionModel(BaseModel):
 
 class FilingExtraction(BaseModel):
     filing_id: str = Field(description="The unique ID of the document, e.g., 20033725")
-    name: str = Field(description="Full name of the filer")
+    first_name: str = Field(description="first name of the filer")
+    last_name: str = Field(description="Last name of the filer")
+    middle_name: str = Field(description="Last name of the filer")
     status: str = Field(description="Membership status, e.g., Member, Candidate")
     state_district: str = Field(description="The state and district code, e.g., CA11")
     transactions: List[TransactionModel]

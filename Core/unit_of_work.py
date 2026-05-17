@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import TypeVar, Generic
-from Repository.documents_repository import AbstractRepository
+from Repository.documents_repository import AbstractRepository, CommitteeRepository
 
 
 # Assuming T is your Document model type
@@ -11,6 +11,9 @@ class AbstractUnitOfWork(ABC):
     documents: AbstractRepository
     stocks: AbstractRepository
     queries: AbstractRepository
+    committee: AbstractRepository
+    legislator: AbstractRepository
+    committee_membership: CommitteeRepository
 
     async def __aenter__(self) -> "AbstractUnitOfWork":
         return self

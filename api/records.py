@@ -6,10 +6,11 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, status, UploadFile, File
 from Core.dependencies import Neo4jDep, UoWDep, PostgresDep
 from Repository.documents_repository import DocumentRepository
-from MessageBroker import rabbitmq_client
-from Repository.graph_repository import Neo4jRepository
+from Repository.graph_repository import Neo4jRepository, CommitteeRepository, TransactionRepository
 from Service.document_service import DocumentsService
 from Service.stock_gain_service import StockGainsService
+from Service.commitee_service import CommitteeService
+from Service.graph_service import GraphService
 from Schema.base_schema import DocumentUpdateRequest, IngestRequest, MonitorChangesRequest, GetAssociatedTransactions, GetPerformanceRequest
 router = APIRouter()
 
@@ -29,9 +30,35 @@ def _neo4j_service(session: Any, label: str) -> Neo4jRepository:
     repo.label = label
     return repo
 
+
+def _neo4j_service(session: Any, label: str, repo_type: str = "base") -> Neo4jRepository:
+    """Factory that returns the appropriate repository subclass."""
+    
+    repos = {
+        "base": Neo4jRepository,
+        "committee": CommitteeRepository,
+        "transaction": TransactionRepository,
+    }
+    
+    repo_class = repos.get(repo_type, Neo4jRepository)
+    repo = repo_class(session)  # ← Creates instance of the correct class
+    repo.label = label
+    return repo
+
+
+
 # ── PostgreSQL example routes ─────────────────────────────────────────────────
 
 doc_router = APIRouter(prefix="/documents", tags=["Documents"])
+
+
+@doc_router.get("/health_check", summary="Scan all rows in the documents table", status_code=status.HTTP_200_OK)
+async def health_check():
+    """ Performs a health_check . """
+    return {
+        "Status": 'OK'
+    }
+
 
 @doc_router.get("/data", summary="Scan all rows in the documents table")
 async def scan_documents(
@@ -85,7 +112,6 @@ async def upload_documents_csv(
             status_code=400, 
             detail="Invalid file extension. Please upload a .csv file."
         )
-    ##repo = _postgres_service(session, "documents", "oden", "doc_id")
     service = DocumentsService(uow)
     try:
         count = await service.process_document_csv(file=file)
@@ -101,6 +127,17 @@ async def upload_documents_csv(
             detail=f"Error processing CSV: {str(e)}"
         )
 
+
+@doc_router.get("/ingest_commitees", summary="Find committee info.", status_code=status.HTTP_201_CREATED)
+async def ingest_committees(
+    uow: UoWDep,
+):
+    """ Get unprocesses documents, simple Boolean check for now, but in the future date check will work best. """
+    service = CommitteeService(uow)
+    count = await service.ingest_committee_data()
+    return {
+        "update": count
+    }
 
 @doc_router.post("/ingest_documents", summary="Check unprocessesed doc_ids, send to queue to process.", status_code=status.HTTP_201_CREATED)
 async def ingest_documents(
@@ -127,7 +164,7 @@ async def doc_id_check(
     }
 
 @doc_router.post("/natural_language_query", status_code=status.HTTP_201_CREATED)
-async def upload_documents_csv(
+async def natural_language_query(
     uow: UoWDep,
     question: str = None
 ):
@@ -200,18 +237,31 @@ async def get_client_performance(
 
 # ── Neo4j example routes ──────────────────────────────────────────────────────
 
-neo4j_router = APIRouter(prefix="/neo4j/{label}", tags=["Neo4j"])
+neo4j_router = APIRouter(prefix="/graph", tags=["Neo4j"])
 
 
-@neo4j_router.get("/", summary="List all nodes with a given label")
+@neo4j_router.get("/sync", summary="List all nodes with a given label")
 async def list_nodes(
-    label: str,
     session: Neo4jDep,
-    limit: int = Query(100, ge=1, le=1000),
-    offset: int = Query(0, ge=0),
+    uow: UoWDep,
 ):
-    svc = _neo4j_service(session, label)
-    return await svc.list(limit=limit, offset=offset)
+    graph_base = _neo4j_service(session, "Committee", "base")
+    graph_base_committee = _neo4j_service(session, "Committee", "committee")
+    service = CommitteeService(uow)
+    graph_service = GraphService(graph_base)
+    graph_service_com = GraphService(graph_base_committee)
+
+
+    committees = await service.get_committees()
+    committees_rel = await service.get_committees_relationships()
+    if committees:
+        cnt = await graph_service.create_committee(committees)
+        cnt_members = await graph_service_com.merge_committee_member(committees_rel)
+
+    return {
+        "committees": cnt,
+        "committee_members": cnt_members
+    }
 
 
 @neo4j_router.get("/{node_id}", summary="Get a node by element ID")

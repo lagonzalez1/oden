@@ -19,7 +19,7 @@ from Repository.graph_repository import TransactionRepository
 from Core.SqlAlchemyUnitOfWork import SqlAlchemyUnitOfWork
 from functools import wraps
 from Service.document_service import DocumentsService
-from Service.graph_service import BaseService as GraphService
+from Service.graph_service import GraphService as GraphService
 from Database.postgres import postgres_db
 from Database.neo4j_ import neo4j_db
 import io

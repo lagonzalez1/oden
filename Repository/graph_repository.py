@@ -1,8 +1,12 @@
+import logging
 from abc import ABC, abstractmethod
-from typing import Any, Generic, Sequence, TypeVar, Dict, List
+from typing import Any, Generic, Sequence, TypeVar, Dict, List, Optional
 import uuid
 from neo4j import AsyncSession as Neo4jSession
 from datetime import datetime
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
@@ -93,14 +97,15 @@ class Neo4jRepository(AbstractRepository[T]):
     async def create(self, data: dict[str, Any]) -> T:
         """Create a new node."""
         # Remove id if present (let Neo4j generate)
-        data_copy = {k: v for k, v in data.items() if k != 'id'}
-        props = ", ".join([f"n.{k} = ${k}" for k in data_copy.keys()])
+        logger.info(f"Data being sent to Neo4j: {data}")
+        props = ", ".join([f"n.{k} = ${k}" for k in data.keys()])
         cypher = f"""
-        CREATE (n:{self.label})
-        SET {props}
-        RETURN n
+            CREATE (n:{self.label})
+                SET {props}
+            RETURN n
         """
-        result = await self._session.run(cypher, **data_copy)
+        logging.info(cypher)
+        result = await self._session.run(cypher, **data)
         record = await result.single()
         return record[0]
 
@@ -134,24 +139,36 @@ class TransactionRepository(Neo4jRepository):
     # ── Filer (Person) ────────────────────────────────────────────────────────
     async def merge_filer(self, data: Dict[str, Any]) -> str:
         """Merge the Person/Filer and their District."""
-        cypher = """
-        MERGE (p:Person {name: $name})
-        SET p.status = $status,
-            p.state_district = $state_district,
-            p.last_updated = datetime()
-        RETURN p.name as filer_id
-        """
-        params = {
-        "name": data["name"],
-        "status": data["status"],
-        "state_district": data["state_district"]
-        }
-        result = await self._session.run(
-            cypher,
-            **params
-        )
-        record = await result.single()
-        return record["filer_id"]
+        try:
+            cypher = """
+            MERGE (p:Member {first_name: $first_name, last_name: $last_name})
+            ON CREATE SET
+                p.id = randomUUID(),
+                p.first_name = $first_name,
+                p.last_name = $last_name,
+                p.created_at = datetime()
+            SET 
+                p.status = $status,
+                p.state_district = $state_district,
+                p.last_updated = datetime()
+            
+            RETURN p.id as id
+            """
+            params = {
+            "first_name": data["first_name"],
+            "last_name": data["last_name"],
+            "status": data["status"],
+            "state_district": data["state_district"]
+            }
+            result = await self._session.run(
+                cypher,
+                **params
+            )
+            record = await result.single()
+            return record["id"]
+        except Exception as e:
+                logger.info(f"[GRAPH_REPO] Error merge_filer: {e}")
+                raise e
 
     async def merge_asset(self, tx: Dict[str, Any]) -> str:
         """Merge Issuer and Asset, then link them."""
@@ -213,45 +230,84 @@ class TransactionRepository(Neo4jRepository):
         return None
     
     # ── Transaction (The Event) ──────────────────────────────────────────────
-    async def create_transaction(self, tx: Dict[str, Any], filer_name: str, filing_id: str) -> str:
-        """Create the central Transaction node and connect to Filer and Asset."""
-        if tx and tx.get("ticker") is None:
-            return
-        tx_id = str(uuid.uuid4())
-        date_obj = self.parse_date(tx["transaction_date"])
-        if date_obj is None:
-            return 
-        formatted_date = date_obj.strftime("%Y-%m-%d")
-        cypher = """
-            MERGE (p:Person {name: $filer_name})
-            MERGE (a:Asset {ticker: $ticker})
-            CREATE (t:Transaction {
-                id: $tx_id,
-                doc_id: $filing_id,
-                type: $type,
-                trade_date: date($date),
-                amount_range: $amount,
-                description: $desc,
-                created_at: datetime()
-            })
-            CREATE (p)-[:EXECUTED]->(t)
-            CREATE (t)-[:INVOLVES]->(a)
-            RETURN t.id as transaction_id
-        """
-        result = await self._session.run(
-            query=cypher,
-            filer_name=filer_name,
-            ticker=tx["ticker"],
-            tx_id=tx_id,
-            filing_id=filing_id,
-            type=tx["transaction_type"],
-            date=formatted_date,
-            amount=tx["amount_range"],
-            desc=tx.get("description")
-        )
-        record = await result.single()
-        return record["transaction_id"] if record else None
+    async def create_transaction(self, tx: Dict[str, Any], member_id: str, filing_id: str) -> str:
+        try:
+            """Create the central Transaction node and connect to Filer and Asset."""
+            if tx and tx.get("ticker") is None:
+                return
+            tx_id = str(uuid.uuid4())
+            date_obj = self.parse_date(tx["transaction_date"])
+            if date_obj is None:
+                return 
+            formatted_date = date_obj.strftime("%Y-%m-%d")
+            cypher = """
+                MERGE (p:Member {id: $member_id})
+                MERGE (a:Asset {ticker: $ticker})
+                CREATE (t:Transaction {
+                    id: $tx_id,
+                    doc_id: $filing_id,
+                    type: $type,
+                    trade_date: date($date),
+                    amount_range: $amount,
+                    description: $desc,
+                    created_at: datetime()
+                })
+                CREATE (p)-[:EXECUTED]->(t)
+                CREATE (t)-[:INVOLVES]->(a)
+                RETURN t.id as transaction_id
+            """
+            result = await self._session.run(
+                query=cypher,
+                member_id=member_id,
+                ticker=tx["ticker"],
+                tx_id=tx_id,
+                filing_id=filing_id,
+                type=tx["transaction_type"],
+                date=formatted_date,
+                amount=tx["amount_range"],
+                desc=tx.get("description")
+            )
+            record = await result.single()
+            return record["transaction_id"] if record else None
+        except Exception as e:
+            logger.info(f"[GRAPH_REPO] Error create_transaction: {e}")
+            raise e
 
     # ── Orchestrator ──────────────────────────────────────────────────────────
 
-    
+
+class CommitteeRepository(Neo4jRepository):
+    """ Repository for committee data"""
+
+
+    async def merge_committee_member(self, data: Dict[str, Any])->str:
+        cypher = """
+            MATCH (c:Committee {id: $id})
+            CREATE (t:Member {
+                id: $id,
+                first_name: $first_name,
+                last_name: $last_name,
+                bioguide_id: $bioguide_id,
+                chamber: $chamber,
+                leadership_role: $leadership_role,
+                party: $party,
+                state: $state,
+                committee_id: $committee_id
+            })
+            CREATE (t)-[:IS_MEMBER_OF]->(c)
+            RETURN c.id as committee_id, t.id as member_id
+        """
+        result = await self._session.run(
+            query=cypher,
+            id=data['committee_id'],
+            first_name=data['first_name'],
+            last_name=data['last_name'],
+            bioguide_id=data['bioguide_id'],
+            chamber=data['chamber'],
+            leadership_role=data['leadership_role'],
+            party=data['party'],
+            state=data['state'],
+            committee_id=data['committee_id'],
+        )
+        record = await result.single()
+        return record

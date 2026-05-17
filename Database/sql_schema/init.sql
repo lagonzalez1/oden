@@ -102,3 +102,54 @@ CREATE TABLE oden.natural_language_queries(
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+
+CREATE TABLE IF NOT EXISTS oden.committee (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    committee_id VARCHAR(10) UNIQUE, -- e.g., 'SSAF'
+    parent_committee_id UUID REFERENCES oden.committee(id), -- For subcommittees
+    congress_num SMALLINT, -- e.g., 119
+    chamber VARCHAR(50), -- house, senate, joint
+    committee_type VARCHAR(50), -- standing, select, special, joint
+    title VARCHAR(255) NOT NULL,
+    url VARCHAR(255),
+    office VARCHAR(100),
+    is_subcommittee BOOLEAN DEFAULT FALSE,
+    tags TEXT[],
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+
+
+CREATE TABLE IF NOT EXISTS oden.legislator (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    bioguide_id VARCHAR(10) UNIQUE NOT NULL, -- Standard U.S. Congress ID
+    prefix VARCHAR(50),
+    first_name VARCHAR(100) NOT NULL,
+    last_name VARCHAR(100) NOT NULL,
+    party VARCHAR(50), -- Democrat, Republican, Independent
+    state CHAR(2), -- e.g., 'NY', 'TX'
+    district VARCHAR(10), -- '00' for At-Large, or '01', '02', etc.
+    chamber VARCHAR(20), -- House or Senate
+    leadership_role VARCHAR(250), -- e.g., 'Speaker', 'Majority Leader'
+    twitter_handle VARCHAR(100),
+    official_url VARCHAR(255),
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+
+CREATE TABLE IF NOT EXISTS oden.committee_membership (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    legislator_id UUID REFERENCES oden.legislator(id) ON DELETE CASCADE,
+    committee_id UUID REFERENCES oden.committee(id) ON DELETE CASCADE,
+    
+    -- Specific assignment details
+    role VARCHAR(100) DEFAULT 'Member', -- 'Chair', 'Ranking Member', 'Vice Chair'
+    rank_in_party INT, -- Seniority rank within their party on the committee
+    is_ex_officio BOOLEAN DEFAULT FALSE, -- Some leaders serve automatically
+    assignment_date DATE,
+    
+    -- Ensure a legislator isn't added to the same committee twice in one session
+    UNIQUE(legislator_id, committee_id)
+);

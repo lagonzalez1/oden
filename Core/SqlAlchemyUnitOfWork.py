@@ -1,5 +1,5 @@
 
-from Repository.documents_repository import PostgresRepository, StockRepository
+from Repository.documents_repository import PostgresRepository, StockRepository, CommitteeRepository
 from Core.unit_of_work import AbstractUnitOfWork
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +27,24 @@ class SqlAlchemyUnitOfWork(AbstractUnitOfWork):
         self.queries.schema_name = "oden"
         self.queries.table_name = "natural_language_queries"
         self.queries.pk_name = "id"
+
+
+        # Configuration for Stocks
+        self.committee = PostgresRepository(self._session)
+        self.committee.schema_name = "oden"
+        self.committee.table_name = "committee"
+        self.committee.pk_name = "id"
+
+        self.legislator = PostgresRepository(self._session)
+        self.legislator.schema_name = "oden"
+        self.legislator.table_name = "legislator"
+        self.legislator.pk_name = "bioguide_id"
+
+        self.committee_membership = CommitteeRepository(self._session)
+        self.committee_membership.schema_name = "oden"
+        self.committee_membership.table_name = "committee_membership"
+        self.committee_membership.pk_name = "id"
+
         return self
 
     async def commit(self):

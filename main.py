@@ -49,3 +49,5 @@ async def root():
         "version": settings.APP_VERSION,
         "status": "running",
     }
+
+

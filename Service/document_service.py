@@ -3,9 +3,8 @@ import io
 import json
 from datetime import datetime
 from fastapi import UploadFile
-from Repository.documents_repository import AbstractRepository
 from Core.unit_of_work import AbstractUnitOfWork
-from typing import Any, Generic, Sequence, TypeVar, List, Dict, Optional
+from typing import Any, TypeVar, List, Dict, Optional
 from MessageBroker.rabbitmq_client import rabbitmq_client
 import logging
 import zipfile
@@ -152,6 +151,8 @@ class DocumentsService:
                 expiration=500000
             )
         return rows_added
+
+
 
     async def ingest_documents(self, year: Optional[str])->bool:
         try:

@@ -73,7 +73,7 @@ class PostgresRepository(AbstractRepository[T]):
             await self._session.close()
 
 
-    async def get_table(self, limit: int = 100, offset: int = 0, filters: Dict = {}) -> Sequence[Any]:
+    async def get_table(self, limit: int = 200, offset: int = 0, filters: Dict = {}) -> Sequence[Any]:
         """
         Fetch all rows from `table_name`, with optional key=value filters.
         Replace with SQLAlchemy ORM / select() calls in your subclass.
@@ -82,7 +82,7 @@ class PostgresRepository(AbstractRepository[T]):
         params: dict[str, Any] = {"limit": limit, "offset": offset}
 
         if filters:
-            conditions = " AND ".join(f"{k} = {v}" for k,v in filters.items())
+            conditions = " AND ".join(f"{k} = {v}" for k, v in filters.items())
             where_clause = f"WHERE {conditions}"
             params.update(filters)
 
@@ -210,3 +210,22 @@ class StockRepository(PostgresRepository):
             "offset":     offset
         })
         return result.mappings().all()
+    
+
+class CommitteeRepository(PostgresRepository):
+    table_name = "committee_membership"
+    schema_name = "oden"
+    pk_name = "id"
+
+    async def get_committee_membership(self):
+        query = text(f""" 
+            select l.first_name, l.last_name, l.bioguide_id, l.chamber, 
+            l.leadership_role, l.party, l.state, cm.committee_id ,com.title, com.is_subcommittee, cm.role
+            from oden.committee_membership cm
+            left join oden.committee com on cm.committee_id = com.id
+            left join oden.legislator l on l.id = cm.legislator_id;        
+        """)
+        result = await self._session.execute(query)
+        return result.mappings().all()
+
+    

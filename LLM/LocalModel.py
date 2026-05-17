@@ -43,7 +43,7 @@ class LocalModel:
             response = requests.post(
                 f"{OLLAMA_BASE_URL}/api/generate",
                 json=payload,
-                timeout=50000,
+                timeout=(5, 120) 
             )
             response.raise_for_status()
 
@@ -66,7 +66,9 @@ class LocalModel:
             validated_data = self.response_validator.model_validate_json(raw)
 
             return validated_data.model_dump()
-
+        except requests.exceptions.Timeout:
+            logger.info(f"[ERROR] requests.exceptions.Timeout _invoke_model: {e}")
+            raise
         except ValidationError as e:
             logger.info(f"[ERROR] Validation error on _invoke_model: {e}")
             raise

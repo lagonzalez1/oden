@@ -23,7 +23,7 @@ from Repository.graph_repository import TransactionRepository
 from Core.SqlAlchemyUnitOfWork import SqlAlchemyUnitOfWork
 from functools import wraps
 from Service.document_service import DocumentsService
-from Service.graph_service import BaseService as GraphService
+from Service.graph_service import GraphService as GraphService
 from Downloads.DownloadFile import DownloadFile 
 from YFinance.ProcessFinancials import ProcessFinancials
 from Database.postgres import postgres_db
@@ -195,17 +195,21 @@ async def transactions_parsed(content: Dict[str, Any]) -> Optional[List[Dict[str
     return await processor.process_row()
 
 async def successfull_extraction_save(doc_id: str, content: Dict[str, Any], doc_size: Optional[int], document_service, neo4j_service):
-    update = { 'doc_id_parsed': True, 'processed_status': "SUCCESS", 
-            "last_updated_date": datetime.now(), "last_updated_date": datetime.now(), 'doc_size': doc_size}
-    logger.info(f"[successfull_extraction_save] content: {content}")
-    tx = await transactions_parsed(content)
+    try:
+        update = { 'doc_id_parsed': True, 'processed_status': "SUCCESS", 
+                "last_updated_date": datetime.now(), "last_updated_date": datetime.now(), 'doc_size': doc_size}
+        logger.info(f"[successfull_extraction_save] content: {content}")
+        ##tx = await transactions_parsed(content)
 
-    logger.info(f"[transactions_parsed] response {tx}")
-    if tx is not None:
-        await document_service.create_transaction_gains(data=tx)
+        ##logger.info(f"[transactions_parsed] response {tx}")
+        ##if tx is not None:
+        ##    await document_service.create_transaction_gains(data=tx)
 
-    await document_service.update_extractions(doc_id, update)
-    await neo4j_service.ingest_filing(content)
+        await document_service.update_extractions(doc_id, update)
+        await neo4j_service.ingest_filing(content)
+    except Exception as e:
+        logger.error(f"Failed ingest data: {e}")
+        return False
 
 async def failed_extraction(doc_id: str, document_service):
     update = { 'doc_id_parsed': False, 'processed_status': "FAILED", 

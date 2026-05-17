@@ -3,7 +3,9 @@ Extract all financial transactions from the document below.
 
 FIELD DEFINITIONS:
 - filing_id      : The unique document ID found on the filing (string)
-- name           : Full name of the filer including title e.g. "Hon. Nancy Pelosi" (string)
+- first_name     : First name of the filer including e.g. "Nancy Pelosi" (string) -> Nancy
+- last_name      : Last name of the filer e.g. "Nancy Pelosi" (string) -> Pelosi
+- middle_name    : last_name if applicable
 - status         : Filer role — one of: "Member", "Spouse", "Dependent" (string)
 - state_district : State and district code e.g. "CA11" (string)
 
@@ -30,7 +32,9 @@ METADATA FIELDS (include only if present in document, otherwise omit key entirel
 RETURN FORMAT — follow this schema exactly:
 {
   "filing_id": "string",
-  "name": "string",
+  "first_name": "string",
+  "last_name": "string",
+  "middle_name": "string",
   "status": "string",
   "state_district": "string",
   "transactions": [
@@ -46,8 +50,10 @@ RETURN FORMAT — follow this schema exactly:
         "strike_price": "float | null",
         "instrument": "string | null"
       }
+      
     }
-  ]
+  ],
+  
 }
 
 Document text:

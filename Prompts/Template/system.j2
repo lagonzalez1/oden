@@ -4,7 +4,7 @@ from U.S. Congressional Periodic Transaction Reports (PTRs).
 DOCUMENT STRUCTURE:
 Every document follows this layout:
   1. Filing ID        — a numeric identifier at the top of the document
-  2. Filer Info       — Name, Status (Member/Spouse/Dependent), State/District
+  2. Filer Info       — First_name, Last_name, middle_name, Status (Member/Spouse/Dependent), State/District
   3. Transactions     — a table with the following columns:
        Owner | Asset Name (Ticker) [Asset Type] | Transaction Type | 
        Transaction Date | Notification Date | Amount Range | Cap Gains > $200?
@@ -12,7 +12,6 @@ Every document follows this layout:
        - "Filing status:" line  — ignore this
        - "Description:"  line   — extract metadata (shares, strike price, instrument type, 
                                   expiration date) from this field when present
-
 EXTRACTION RULES:
 1. DATES
    - All dates are in the current filing year unless the description explicitly states otherwise.
