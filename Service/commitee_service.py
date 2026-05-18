@@ -92,10 +92,7 @@ class CommitteeService:
                 for url in committee_urls:
                     root = await self.download_and_parse_xml(url)
                     for committee in root.findall("committees"):
-                        logger.info(committee)
-                        majority_party = committee.findtext("majority_party")
-                        committee_name = committee.findtext("committee_name")
-                        committee_code = committee.findtext("committee_code")
+                        majority_party, committee_name, committee_code = committee.findtext("majority_party"), committee.findtext("committee_name"), committee.findtext("committee_code")
                         committee_query = { "committee_id": committee_code, "parent_committee_id": None, "title": committee_name, "chamber": "Senate", "office": f"Majority-{majority_party}"}
                         committee_insert = await self.uow.committee.create(committee_query)
                         await self.uow.commit()
@@ -109,13 +106,16 @@ class CommitteeService:
                                 position = member.findtext("position")
                                 legislator_query = { "bioguide_id": f"{state}:{party}:{first_name[0]}:{last_name[0]}", "first_name": first_name, 
                                                     "last_name": last_name, "party": party, "state": state, "chamber": "Senate", "leadership_role": position}
-                                legislator_insert = await self.uow.legislator.create(legislator_query)
+                                legislator_insert = await self.uow.legislator.upsert(
+                                    data=legislator_query,
+                                    conflict_column="bioguide_id"
+                                )
                                 await self.uow.commit()
                                 if legislator_insert: legislator_insert_cnt += 1
-                                if legislator_insert and committee_insert:
-                                    membership_query = {"legislator_id": str(legislator_insert.id), "committee_id": str(committee_insert.id)}
-                                    await self.uow.committee_membership.create(membership_query)
-                                    await self.uow.commit()
+                                membership_query = {"legislator_id": str(legislator_insert.id), "committee_id": str(committee_insert.id)}
+                                await self.uow.committee_membership.create(membership_query)
+                                await self.uow.commit()
+                                    
 
                         for sub in committee.findall("subcommittee"):
                             subcommittee_name, subcommittee_code = sub.findtext("subcommittee_name"), sub.findtext("committee_code")
@@ -125,20 +125,24 @@ class CommitteeService:
                             await self.uow.commit()
                             if sub_committee_insert: sub_committee_insert_cnt += 1
                             sub_members = sub.find("members")
-                            if sub_members is not None and sub_committee_insert:
+                            if sub_members is not None:
                                 for member in sub_members.findall("member"):
                                     first_name, last_name = member.find("name/first").text, member.find("name/last").text
                                     state, party = member.findtext("state"), member.findtext("party")
                                     position = member.findtext("position")
                                     sub_legislator_query = { "bioguide_id": f"{state}:{party}:{first_name[0]}:{last_name[0]}", "first_name": first_name, 
                                                             "last_name": last_name, "party": party, "state": state, "chamber": "Senate", "leadership_role": position}
-                                    sub_legislator_insert = await self.uow.legislator.create(sub_legislator_query)
+                                    sub_legislator_insert = await self.uow.legislator.upsert(
+                                        data=sub_legislator_query,
+                                        conflict_column="bioguide_id"
+                                    )
+                                    logger.info(f"sub_legislator_insert: {sub_legislator_insert}")
                                     await self.uow.commit()
                                     if sub_legislator_insert: legislator_insert_cnt += 1
-                                    if sub_legislator_insert and sub_committee_insert:
-                                        membership_query = {"legislator_id": str(sub_legislator_insert.id), "committee_id": str(sub_committee_insert.id), "role": position}
-                                        await self.uow.committee_membership.create(membership_query)
-                                        await self.uow.commit()
+                                    membership_query = {"legislator_id": str(sub_legislator_insert.id), "committee_id": str(sub_committee_insert.id), "role": position}
+                                    await self.uow.committee_membership.create(membership_query)
+                                    await self.uow.commit()
+                                        
 
             return { legislator_insert_cnt, committee_insert_cnt, sub_committee_insert_cnt }
         except Exception as e:

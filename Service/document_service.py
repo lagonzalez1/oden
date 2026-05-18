@@ -107,6 +107,10 @@ class DocumentsService:
         async with self.uow:
             for row in csv_reader:
                 doc_id = row.get("DocID")
+                found = await self.uow.documents.get_by_id(doc_id)
+                await self.uow.commit()
+                if found:
+                    continue
                 year_val = row.get("Year")
                 
                 db_data = {

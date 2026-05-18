@@ -37,6 +37,10 @@ class AbstractRepository(ABC, Generic[T]):
     @abstractmethod
     async def delete(self, record_id: Any) -> bool:
         ...
+    
+    @abstractmethod
+    async def upsert(self, data: dict[str, Any], conflict_column: str) -> bool:
+        ...
 
 
 # ── PostgreSQL base repo ───────────────────────────────────────────────────────
@@ -136,6 +140,41 @@ class PostgresRepository(AbstractRepository[T]):
         except sqlalchemy.exc.ArgumentError as e:
             logger.error(f"[DocumentRepository Error] error: {e}")
             raise e
+    
+    async def upsert(self, data: dict[str, Any], conflict_column: str) -> Any:
+        """
+        Insert a row or update on conflict.
+        Unlike create() which returns None on conflict, this always returns the row.
+        """
+        try:
+            columns = ", ".join(data.keys())
+            values  = ", ".join(f":{k}" for k in data.keys())
+
+            # Exclude the conflict column from the update clause
+            # — we don't want to overwrite the PK/unique key itself
+            update_clause = ", ".join(
+                f"{k} = EXCLUDED.{k}"
+                for k in data.keys()
+                if k != conflict_column
+            )
+
+            query = text(f"""
+                INSERT INTO {self.full_table_name} ({columns})
+                VALUES ({values})
+                ON CONFLICT ({conflict_column})
+                DO UPDATE SET {update_clause}
+                RETURNING *
+            """)
+
+            result = await self._session.execute(query, data)
+            return result.mappings().first()
+
+        except sqlalchemy.exc.InvalidRequestError as e:
+            logger.error(f"[{self.table_name}] upsert InvalidRequestError: {e}")
+            raise
+        except sqlalchemy.exc.ArgumentError as e:
+            logger.error(f"[{self.table_name}] upsert ArgumentError: {e}")
+            raise
 
     async def delete(self, record_id: Any) -> bool:
         query = text(f"DELETE FROM {self.full_table_name} WHERE {self.pk_name} = :id")
@@ -219,7 +258,7 @@ class CommitteeRepository(PostgresRepository):
 
     async def get_committee_membership(self):
         query = text(f""" 
-            select l.first_name, l.last_name, l.bioguide_id, l.chamber, 
+            select l.id AS member_id , l.first_name, l.last_name, l.bioguide_id, l.chamber, 
             l.leadership_role, l.party, l.state, cm.committee_id ,com.title, com.is_subcommittee, cm.role
             from oden.committee_membership cm
             left join oden.committee com on cm.committee_id = com.id

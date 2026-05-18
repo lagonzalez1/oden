@@ -135,6 +135,7 @@ async def ingest_committees(
     """ Get unprocesses documents, simple Boolean check for now, but in the future date check will work best. """
     service = CommitteeService(uow)
     count = await service.ingest_committee_data()
+    
     return {
         "update": count
     }
@@ -233,8 +234,6 @@ async def get_client_performance(
         )
 
 
-
-
 # ── Neo4j example routes ──────────────────────────────────────────────────────
 
 neo4j_router = APIRouter(prefix="/graph", tags=["Neo4j"])
@@ -253,7 +252,9 @@ async def list_nodes(
 
 
     committees = await service.get_committees()
+    print(f"Committee size: {len(committees)}")
     committees_rel = await service.get_committees_relationships()
+    print(f"committees_rel size: {len(committees_rel)}")
     if committees:
         cnt = await graph_service.create_committee(committees)
         cnt_members = await graph_service_com.merge_committee_member(committees_rel)

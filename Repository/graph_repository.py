@@ -141,15 +141,18 @@ class TransactionRepository(Neo4jRepository):
         """Merge the Person/Filer and their District."""
         try:
             cypher = """
-            MERGE (p:Member {first_name: $first_name, last_name: $last_name})
+            MERGE (p:Member {first_name: $first_name, last_name: $last_name, state: $state})
             ON CREATE SET
                 p.id = randomUUID(),
                 p.first_name = $first_name,
                 p.last_name = $last_name,
+                p.state_district = $state_district,
+                p.state = $state,
                 p.created_at = datetime()
             SET 
                 p.status = $status,
                 p.state_district = $state_district,
+                p.state = $state,
                 p.last_updated = datetime()
             
             RETURN p.id as id
@@ -158,7 +161,8 @@ class TransactionRepository(Neo4jRepository):
             "first_name": data["first_name"],
             "last_name": data["last_name"],
             "status": data["status"],
-            "state_district": data["state_district"]
+            "state_district": data["state_district"],
+            "state": str(data["state_district"][:2])
             }
             result = await self._session.run(
                 cypher,
@@ -280,34 +284,40 @@ class CommitteeRepository(Neo4jRepository):
     """ Repository for committee data"""
 
 
-    async def merge_committee_member(self, data: Dict[str, Any])->str:
+    async def merge_committee_member(self, data: Dict[str, Any]) -> str:
         cypher = """
-            MATCH (c:Committee {id: $id})
-            CREATE (t:Member {
-                id: $id,
-                first_name: $first_name,
-                last_name: $last_name,
-                bioguide_id: $bioguide_id,
-                chamber: $chamber,
-                leadership_role: $leadership_role,
-                party: $party,
-                state: $state,
-                committee_id: $committee_id
-            })
-            CREATE (t)-[:IS_MEMBER_OF]->(c)
-            RETURN c.id as committee_id, t.id as member_id
+            MATCH (c:Committee {id: $committee_id})
+            MERGE (m:Member {bioguide_id: $bioguide_id})
+            ON CREATE SET
+                m.id         = $member_id,
+                m.first_name = $first_name,
+                m.last_name  = $last_name,
+                m.chamber    = $chamber,
+                m.party      = $party,
+                m.state      = $state,
+                m.created_at = datetime()
+            ON MATCH SET
+                m.leadership_role = $leadership_role,
+                m.chamber         = $chamber,
+                m.party           = $party,
+                m.updated_at      = datetime()
+            MERGE (m)-[r:IS_MEMBER_OF]->(c)
+            ON CREATE SET r.role       = $role,
+                        r.created_at = datetime()
+            RETURN c.committee_id AS committee_id, m.bioguide_id AS member_id
         """
         result = await self._session.run(
-            query=cypher,
-            id=data['committee_id'],
+            cypher,
+            committee_id=data['committee_id'],
+            member_id=str(data.get('member_id', '')),
+            bioguide_id=data['bioguide_id'],
             first_name=data['first_name'],
             last_name=data['last_name'],
-            bioguide_id=data['bioguide_id'],
             chamber=data['chamber'],
-            leadership_role=data['leadership_role'],
+            leadership_role=data.get('leadership_role'),
             party=data['party'],
             state=data['state'],
-            committee_id=data['committee_id'],
+            role=data.get('role', 'Member'),
         )
         record = await result.single()
         return record

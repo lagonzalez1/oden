@@ -63,7 +63,6 @@ class GraphService(Generic[T]):
             row = { "title": data[i].title, "id": str(data[i].id), "parent_committee_id": str(data[i].parent_committee_id), 
                    "committee_id": data[i].committee_id, "chamber": data[i].chamber, "office": data[i].office, "is_subcommittee": data[i].is_subcommittee}
             committee_node = await self._repo.create(row)
-            logger.info(committee_node)
             if committee_node: cnt += 1
         return cnt
 
@@ -74,7 +73,8 @@ class GraphService(Generic[T]):
             legislator = { "first_name": data[i].first_name, "last_name": data[i].last_name, "bioguide_id": data[i].bioguide_id,
                           "committee_id": str(data[i].committee_id), "party": data[i].party, "leadership_role": data[i].leadership_role, 
                           "state": data[i].state, "chamber": data[i].chamber }
-            legislator_node = await self._repo.merge_committee_member(legislator)
+            legislator_node = await self._repo.merge_committee_member(dict(legislator))
+            logger.info(legislator_node)
             if legislator_node: cnt += 1
             
         return cnt

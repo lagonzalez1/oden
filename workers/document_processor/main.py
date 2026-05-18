@@ -199,14 +199,15 @@ async def successfull_extraction_save(doc_id: str, content: Dict[str, Any], doc_
         update = { 'doc_id_parsed': True, 'processed_status': "SUCCESS", 
                 "last_updated_date": datetime.now(), "last_updated_date": datetime.now(), 'doc_size': doc_size}
         logger.info(f"[successfull_extraction_save] content: {content}")
-        ##tx = await transactions_parsed(content)
+        tx = await transactions_parsed(content)
 
-        ##logger.info(f"[transactions_parsed] response {tx}")
-        ##if tx is not None:
-        ##    await document_service.create_transaction_gains(data=tx)
+        logger.info(f"[transactions_parsed] response {tx}")
+        if tx is not None:
+            await document_service.create_transaction_gains(data=tx)
 
         await document_service.update_extractions(doc_id, update)
         await neo4j_service.ingest_filing(content)
+        
     except Exception as e:
         logger.error(f"Failed ingest data: {e}")
         return False
@@ -215,6 +216,12 @@ async def failed_extraction(doc_id: str, document_service):
     update = { 'doc_id_parsed': False, 'processed_status': "FAILED", 
             "last_updated_date": datetime.now(), "last_updated_date": datetime.now()}
     await document_service.update_extractions(doc_id, update)
+
+## The issue is this page hands when rabbitmq gets disconnected from this worker.
+## This causes a worker to go stale
+## Possible sol: Existing Person,Member,Committee. 
+# Possilbe sol: clear db
+# possible sol: increate rabbitmq exp time >  
 
 async def main():
     await postgres_db.connect()
