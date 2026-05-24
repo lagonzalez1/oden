@@ -282,6 +282,11 @@ class TransactionRepository(Neo4jRepository):
 
 class CommitteeRepository(Neo4jRepository):
     """ Repository for committee data"""
+    """ 
+        This constrain is required, race condition can cause await to handle another request, creating duplicates. (Concurency)
+        CREATE CONSTRAINT committee_id_unique IF NOT EXISTS
+        FOR (c:Committee) REQUIRE c.id IS UNIQUE;
+    """
 
 
     async def merge_committee_member(self, data: Dict[str, Any]) -> str:
@@ -308,7 +313,7 @@ class CommitteeRepository(Neo4jRepository):
         """
         result = await self._session.run(
             cypher,
-            committee_id=data['committee_id'],
+            committee_id=data['id'],
             member_id=str(data.get('member_id', '')),
             bioguide_id=data['bioguide_id'],
             first_name=data['first_name'],

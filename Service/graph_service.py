@@ -72,7 +72,7 @@ class GraphService(Generic[T]):
         for i in range(0, len(data)):
             legislator = { "first_name": data[i].first_name, "last_name": data[i].last_name, "bioguide_id": data[i].bioguide_id,
                           "committee_id": str(data[i].committee_id), "party": data[i].party, "leadership_role": data[i].leadership_role, 
-                          "state": data[i].state, "chamber": data[i].chamber }
+                          "state": data[i].state, "chamber": data[i].chamber, "id": str(data[i].id) }
             legislator_node = await self._repo.merge_committee_member(dict(legislator))
             logger.info(legislator_node)
             if legislator_node: cnt += 1

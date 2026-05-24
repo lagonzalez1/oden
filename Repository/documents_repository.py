@@ -259,7 +259,7 @@ class CommitteeRepository(PostgresRepository):
     async def get_committee_membership(self):
         query = text(f""" 
             select l.id AS member_id , l.first_name, l.last_name, l.bioguide_id, l.chamber, 
-            l.leadership_role, l.party, l.state, cm.committee_id ,com.title, com.is_subcommittee, cm.role
+            l.leadership_role, l.party, l.state, cm.committee_id AS committee_id, com.title, com.is_subcommittee, cm.role, com.id
             from oden.committee_membership cm
             left join oden.committee com on cm.committee_id = com.id
             left join oden.legislator l on l.id = cm.legislator_id;        
