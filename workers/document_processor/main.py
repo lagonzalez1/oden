@@ -10,8 +10,6 @@ from typing import Dict, Optional, Any, List
 from MessageBroker.rabbitmq_client import RabbitMQConfig, rabbitmq_client
 from Config.settings import settings
 import aio_pika
-import aiohttp
-import fitz  # PyMuPDF
 from Prompts.Builder import PromptBuilder, PromptConfig
 from LLM.DocumentValidator import FilingExtraction
 from LLM.LocalModel import LocalModel
@@ -154,7 +152,7 @@ async def extract_llm_content_with_fallback(content: bytes, text_content: str) -
     
     raise RuntimeError("Both primary and fallback LLM extraction failed")
 
-async def process_document_task(body, message: aio_pika.IncomingMessage, postgres_session, neo4j_session):
+async def process_document_task(body, message: aio_pika.IncomingMessage, postgres_session, neo4j_session) -> bool:
     """ Pika context manager for processing messages ack or non-ack."""
     document_service = _postgres_service(postgres_session)
     neo4j_service = _neo4j_service(neo4j_session)
@@ -177,8 +175,11 @@ async def process_document_task(body, message: aio_pika.IncomingMessage, postgre
                 content = await extract_llm_content_with_fallback(content=None, text_content=text)
                 if content:
                     row = content.get("transactions", [])
+                    first_name, last_name, state_district = content.get("first_name"), content.get("last_name"), content.get("state_district")
+                    bioguide_id = str("H" + first_name[:2].upper() + last_name[:2].upper() +  + state_district[:2].upper())
                     txs = [{**trades, "id": str(uuid.uuid4())} for trades in row]
                     content['transactions'] = txs
+                    content['bioguide_id'] = bioguide_id
                     await successfull_extraction_save(doc_id, content, len(text), document_service, neo4j_service)
                     return True
 
@@ -205,6 +206,7 @@ async def successfull_extraction_save(doc_id: str, content: Dict[str, Any], doc_
         if tx is not None:
             await document_service.create_transaction_gains(data=tx)
 
+        await document_service.upset_legislator(content)
         await document_service.update_extractions(doc_id, update)
         await neo4j_service.ingest_filing(content)
         

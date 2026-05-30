@@ -234,6 +234,29 @@ class DocumentsService:
             # but we log the error here for the Service context.
             logger.error(f"[Document Service] Update failed for {record_id}: {e}")
             raise e
+    
+
+    async def upset_legislator(self, content: Dict[str, Any]) -> T | None:
+        """Update and return an existing record, or None if not found."""
+        try:
+            # 1. Open the transaction boundary
+            async with self.uow:
+                # 2. Perform the update via the repo attached to the UoW
+                data = { "bioguide_id": content.get("bioguide_id"),"first_name": content.get("first_name"), "last_name": content.get("last_name"), 
+                        "party": "NA", "state": content.get("state_district")[:2].upper(), "chamber": "House", "is_active": True }
+                updated_record = await self.uow.legislator.upsert(data, 'bioguide_id')
+                
+                if updated_record:
+                    # 3. Explicitly commit if the update was successful
+                    await self.uow.commit()
+                    return updated_record
+                
+                return None
+        except Exception as e:
+            # The UoW __aexit__ will handle the rollback, 
+            # but we log the error here for the Service context.
+            logger.error(f"[Document Service] Update failed for {content.get("bioguide_id")}: {e}")
+            raise e
 
     async def create_transaction_gains(self, data: List[Dict[str, Any]]) -> int | None:
         """Insert transaction gain rows and return the count of successful inserts."""

@@ -34,7 +34,7 @@ class GraphService(Generic[T]):
     async def ingest_filing(self, llm_content: Dict[str, Any]) -> str:
         """ Orchestrates the ingestion of a full filing result. """
         # 1. Handle the Person id
-        member_id = await self._repo.merge_filer(llm_content)
+        bioguide_id = await self._repo.merge_filer(llm_content)
 
         # 2. Iterate through Transactions
         for tx_data in llm_content.get("transactions", []):
@@ -45,7 +45,7 @@ class GraphService(Generic[T]):
             # Create the Transaction event
             tx_id = await self._repo.create_transaction(
                 tx_data, 
-                member_id, 
+                bioguide_id, 
                 llm_content["filing_id"]
             )
             if tx_id:

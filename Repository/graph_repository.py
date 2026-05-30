@@ -141,7 +141,7 @@ class TransactionRepository(Neo4jRepository):
         """Merge the Person/Filer and their District."""
         try:
             cypher = """
-            MERGE (p:Member {first_name: $first_name, last_name: $last_name, state: $state})
+            MERGE (p:Member {bioguide_id: $bioguide_id})
             ON CREATE SET
                 p.id = randomUUID(),
                 p.first_name = $first_name,
@@ -155,9 +155,10 @@ class TransactionRepository(Neo4jRepository):
                 p.state = $state,
                 p.last_updated = datetime()
             
-            RETURN p.id as id
+            RETURN p.bioguide_id as bioguide_id
             """
             params = {
+            "bioguide_id": data["bioguide_id"],
             "first_name": data["first_name"],
             "last_name": data["last_name"],
             "status": data["status"],
@@ -234,7 +235,7 @@ class TransactionRepository(Neo4jRepository):
         return None
     
     # ── Transaction (The Event) ──────────────────────────────────────────────
-    async def create_transaction(self, tx: Dict[str, Any], member_id: str, filing_id: str) -> str:
+    async def create_transaction(self, tx: Dict[str, Any], bioguide_id: str, filing_id: str) -> str:
         try:
             """Create the central Transaction node and connect to Filer and Asset."""
             if tx and tx.get("ticker") is None:
@@ -245,7 +246,7 @@ class TransactionRepository(Neo4jRepository):
                 return 
             formatted_date = date_obj.strftime("%Y-%m-%d")
             cypher = """
-                MERGE (p:Member {id: $member_id})
+                MERGE (p:Member {bioguide_id: $bioguide_id})
                 MERGE (a:Asset {ticker: $ticker})
                 CREATE (t:Transaction {
                     id: $tx_id,
@@ -262,7 +263,7 @@ class TransactionRepository(Neo4jRepository):
             """
             result = await self._session.run(
                 query=cypher,
-                member_id=member_id,
+                bioguide_id=bioguide_id,
                 ticker=tx["ticker"],
                 tx_id=tx_id,
                 filing_id=filing_id,
