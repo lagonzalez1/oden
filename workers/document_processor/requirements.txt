@@ -25,3 +25,4 @@ pillow
 pandas
 lxml
 yfinance
+beautifulsoup4

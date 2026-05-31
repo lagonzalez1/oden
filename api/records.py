@@ -152,6 +152,18 @@ async def ingest_documents(
         "messages_in_queue": count,
     }
 
+
+@doc_router.post("/ingest_legislators", summary="Check unprocessesed doc_ids, send to queue to process.", status_code=status.HTTP_201_CREATED)
+async def ingest_legislators(
+    uow: UoWDep,
+):
+    """ Fetch legislators from wiki page using Custom class, upsert linkage from committee_ to member_. """
+    service = DocumentsService(uow)
+    cnt = await service.upsert_legislator_from_wiki()
+    return {
+        "processed": cnt,
+    }
+
 @doc_router.post("/monitor_changes", summary="Monitor changes in your db", status_code=status.HTTP_201_CREATED)
 async def doc_id_check(
     uow: UoWDep,

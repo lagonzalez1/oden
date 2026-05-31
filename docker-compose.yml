@@ -100,7 +100,7 @@ services:
       context: .
       dockerfile: workers/document_processor/Dockerfile
     environment:
-      - PYTHONPATH=/:/app:/Config:/Database:/:Repository/:Core/:Schema/:Prompts/:LLM
+      - PYTHONPATH=/:/app:/Config:/Database:/:Repository/:Core/:Schema/:Prompts/:LLM/:Extract_external
     depends_on:
       postgres:
         condition: service_healthy
@@ -115,6 +115,7 @@ services:
       - ./Schema:/Schema
       - ./Repository:/Repository
       - ./LLM:/LLM
+      - ./Extract_external:/Extract_external
       - ./Service:/Service
       - ./Database:/Database
       - ./Prompts:/Prompts
@@ -128,7 +129,7 @@ services:
       context: .
       dockerfile: workers/query_processor/Dockerfile
     environment:
-      - PYTHONPATH=/:/app:/Config:/Database:/:Repository/:Core/:Schema/:Prompts/:LLM
+      - PYTHONPATH=/:/app:/Config:/Database:/:Repository/:Core/:Schema/:Prompts/:LLM/:Extract_external
     depends_on:
       postgres:
         condition: service_healthy
@@ -143,6 +144,7 @@ services:
       - ./Schema:/Schema
       - ./Repository:/Repository
       - ./LLM:/LLM
+      - ./Extract_external:/Extract_external
       - ./Service:/Service
       - ./Database:/Database
       - ./Prompts:/Prompts

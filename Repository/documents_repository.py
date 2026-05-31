@@ -25,6 +25,10 @@ class AbstractRepository(ABC, Generic[T]):
     @abstractmethod
     async def get_by_id(self, record_id: Any) -> T | None:
         ...
+    
+    @abstractmethod
+    async def get_by_col(self, col: str, col_val: str)->T | None:
+        ...
 
     @abstractmethod
     async def create(self, data: dict[str, Any]) -> T:
@@ -96,6 +100,11 @@ class PostgresRepository(AbstractRepository[T]):
         )
         result = await self._session.execute(query, params)
         return result.mappings().all()
+
+    async def get_by_col(self, col: str, col_val: str) ->Any | None:
+        query = text(f"SELECT * FROM {self.full_table_name} WHERE {col} = :id")
+        result = await self._session.execute(query, {"id": col_val})
+        return result.mappings().first()
 
 
     async def get_by_id(self, record_id: Any) -> Any | None:
@@ -267,4 +276,51 @@ class CommitteeRepository(PostgresRepository):
         result = await self._session.execute(query)
         return result.mappings().all()
 
-    
+    async def merge_membership(
+        self,
+        committee_id,
+        legislator_id,
+        role="Member",
+        rank_in_party=None,
+        is_ex_officio=False,
+        assignment_date=None,
+    ):
+        query = text("""
+            INSERT INTO oden.committee_membership (
+                committee_id,
+                legislator_id,
+                role,
+                rank_in_party,
+                is_ex_officio,
+                assignment_date
+            )
+            VALUES (
+                :committee_id,
+                :legislator_id,
+                :role,
+                :rank_in_party,
+                :is_ex_officio,
+                :assignment_date
+            )
+            ON CONFLICT (legislator_id, committee_id)
+            DO UPDATE SET
+                role = EXCLUDED.role,
+                rank_in_party = EXCLUDED.rank_in_party,
+                is_ex_officio = EXCLUDED.is_ex_officio,
+                assignment_date = EXCLUDED.assignment_date
+            RETURNING id;
+        """)
+
+        result = await self._session.execute(
+            query,
+            {
+                "committee_id": committee_id,
+                "legislator_id": legislator_id,
+                "role": role,
+                "rank_in_party": rank_in_party,
+                "is_ex_officio": is_ex_officio,
+                "assignment_date": assignment_date,
+            },
+        )
+
+        return result.scalar_one()      

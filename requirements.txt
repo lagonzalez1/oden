@@ -22,3 +22,5 @@ ollama
 pandas
 httpx
 lxml
+beautifulsoup4
+bs4

@@ -6,6 +6,7 @@ from fastapi import UploadFile
 from Core.unit_of_work import AbstractUnitOfWork
 from typing import Any, TypeVar, List, Dict, Optional
 from MessageBroker.rabbitmq_client import rabbitmq_client
+from Extract_external.main import ExtractWikiContent
 import logging
 import zipfile
 import requests
@@ -156,8 +157,6 @@ class DocumentsService:
             )
         return rows_added
 
-
-
     async def ingest_documents(self, year: Optional[str])->bool:
         try:
             report_df = await self.download_reports(year=year)
@@ -236,26 +235,43 @@ class DocumentsService:
             raise e
     
 
-    async def upset_legislator(self, content: Dict[str, Any]) -> T | None:
-        """Update and return an existing record, or None if not found."""
+    async def upsert_legislator_from_wiki(self) -> T | None:
+        """Create a legislator(HOUSE) if not exist (upsert idempodent), then create the linkage from commitee"""
+
         try:
-            # 1. Open the transaction boundary
+            cnt = 0
+            # 1. Open the transaction boundary, 
             async with self.uow:
-                # 2. Perform the update via the repo attached to the UoW
-                data = { "bioguide_id": content.get("bioguide_id"),"first_name": content.get("first_name"), "last_name": content.get("last_name"), 
-                        "party": "NA", "state": content.get("state_district")[:2].upper(), "chamber": "House", "is_active": True }
-                updated_record = await self.uow.legislator.upsert(data, 'bioguide_id')
-                
-                if updated_record:
-                    # 3. Explicitly commit if the update was successful
-                    await self.uow.commit()
-                    return updated_record
-                
-                return None
+                wiki = ExtractWikiContent()
+                committee_members = wiki.fetch_all_members()
+                for row in committee_members:
+                    if row[0] is None or row[1] is None:
+                        continue
+                    committee_map, chair_map, ranking_map, members_map = row[0], row[1], row[2], dict(row[3])
+                    # 2. Perform the update via the repo attached to the UoW
+                    committee_psql = await self.uow.committee.get_by_col('title', committee_map.get("text"))
+                    if committee_psql:
+                        for k, v in members_map.items():
+                            for name, state in v:
+                                full_name = name.split(" ")
+                                first = full_name[0].upper()
+                                last = full_name[1].upper()
+                                state = wiki.get_abbriv(state).upper()
+                                bioguide_id = f"H{first[:2]}{last[:2]}{state}"
+                                data = { "bioguide_id": bioguide_id,"first_name": first, "last_name": last, 
+                                        "party": "NA", "state": state, "chamber": "House", "is_active": True }
+                                legislator_record = await self.uow.legislator.upsert(data, 'bioguide_id')
+                                if legislator_record:
+                                    merge_record = await self.uow.committee_membership.merge_membership(committee_psql['id'], legislator_record['id'], "Member", None, False, None)
+                                    if merge_record:
+                                        cnt += 1
+                                
+                await self.uow.commit()
+                return cnt
         except Exception as e:
             # The UoW __aexit__ will handle the rollback, 
             # but we log the error here for the Service context.
-            logger.error(f"[Document Service] Update failed for {content.get("bioguide_id")}: {e}")
+            logger.error(f"[Document Service] Update failed for: {e}")
             raise e
 
     async def create_transaction_gains(self, data: List[Dict[str, Any]]) -> int | None:

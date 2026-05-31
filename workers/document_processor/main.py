@@ -176,7 +176,7 @@ async def process_document_task(body, message: aio_pika.IncomingMessage, postgre
                 if content:
                     row = content.get("transactions", [])
                     first_name, last_name, state_district = content.get("first_name"), content.get("last_name"), content.get("state_district")
-                    bioguide_id = str("H" + first_name[:2].upper() + last_name[:2].upper() +  + state_district[:2].upper())
+                    bioguide_id = str("H" + first_name[:2].upper() + last_name[:2].upper() + state_district[:2].upper())
                     txs = [{**trades, "id": str(uuid.uuid4())} for trades in row]
                     content['transactions'] = txs
                     content['bioguide_id'] = bioguide_id
