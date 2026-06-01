@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, Generic, Sequence, TypeVar, Dict, List
+from typing import Any, Generic, Sequence, TypeVar, Dict, List, Optional
 from sqlalchemy import text
 import sqlalchemy
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -90,7 +90,7 @@ class PostgresRepository(AbstractRepository[T]):
         params: dict[str, Any] = {"limit": limit, "offset": offset}
 
         if filters:
-            conditions = " AND ".join(f"{k} = {v}" for k, v in filters.items())
+            conditions = " AND ".join(f"{k} = :{k}" for k, v in filters.items())
             where_clause = f"WHERE {conditions}"
             params.update(filters)
 
@@ -98,6 +98,7 @@ class PostgresRepository(AbstractRepository[T]):
             f"SELECT * FROM {self.full_table_name} {where_clause} "
             f"LIMIT :limit OFFSET :offset"
         )
+        print(query)
         result = await self._session.execute(query, params)
         return result.mappings().all()
 
@@ -265,15 +266,29 @@ class CommitteeRepository(PostgresRepository):
     schema_name = "oden"
     pk_name = "id"
 
-    async def get_committee_membership(self):
-        query = text(f""" 
-            select l.id AS member_id , l.first_name, l.last_name, l.bioguide_id, l.chamber, 
-            l.leadership_role, l.party, l.state, cm.committee_id AS committee_id, com.title, com.is_subcommittee, cm.role, com.id
-            from oden.committee_membership cm
-            left join oden.committee com on cm.committee_id = com.id
-            left join oden.legislator l on l.id = cm.legislator_id;        
+    async def get_committee_membership(self, chamber: Optional[str] = "Sentate"):
+        query = text("""
+            SELECT
+                l.id AS member_id,
+                l.first_name,
+                l.last_name,
+                l.bioguide_id,
+                l.chamber,
+                l.leadership_role,
+                l.party,
+                l.state,
+                cm.committee_id AS committee_id,
+                com.title,
+                com.is_subcommittee,
+                cm.role,
+                com.id
+            FROM oden.committee_membership cm
+            LEFT JOIN oden.committee com ON cm.committee_id = com.id
+            LEFT JOIN oden.legislator l ON l.id = cm.legislator_id
+            WHERE com.chamber = :chamber
         """)
-        result = await self._session.execute(query)
+
+        result = await self._session.execute(query, {"chamber": chamber})
         return result.mappings().all()
 
     async def merge_membership(

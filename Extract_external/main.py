@@ -6,7 +6,6 @@ from bs4 import BeautifulSoup
 import re
 
 STATE_ABBREVIATIONS = {
-    "U.S. Virgin Islands": "VI",
     "Alabama": "AL",
     "Alaska": "AK",
     "Arizona": "AZ",
@@ -57,10 +56,18 @@ STATE_ABBREVIATIONS = {
     "West Virginia": "WV",
     "Wisconsin": "WI",
     "Wyoming": "WY",
+    "Guam": "GU",
+    "District of Columbia": "DC",
+    "Puerto Rico": "PR",
+    "Guam": "GU",
+    "American Samoa": "AS",
+    "U.S. Virgin Islands": "VI",
+    "Northern Mariana Islands": "MP",
 }
 
 
 class ExtractWikiContent:
+    """ Class extracts house of rep from wiki page using bs4 """
         
     def __init__(self):
         self.wiki_url = "https://en.wikipedia.org/wiki/List_of_United_States_House_of_Representatives_committees"
@@ -105,6 +112,7 @@ class ExtractWikiContent:
                         row_data[pos] = cell_info
                     pos += 1
                 
+                
             extracted_data.append(row_data)
         return extracted_data
 
@@ -112,14 +120,18 @@ class ExtractWikiContent:
         committees = self.fetch_all_committees()
         if not committees:
             return None
-        
         for i in range(0, len(committees)):
             row = committees[i]
             if not row[0]:
                 continue
             committee = dict(row[0])
-            response = self.fetch_content(committee.get("href"), self.headers)
+            link = committee.get("href")
+            if link is None or link == "":
+                continue
+            response = self.fetch_content(link, self.headers)
             soup = self._soup(response.text)
+            if not self.valid_committee(soup, "119"):
+                continue
             wiki_table = soup.find("table", {"class": "wikitable"})            
             for r in wiki_table.find_all("tr")[1:]:
                 cells = r.find_all(['td', 'th'])
@@ -136,14 +148,31 @@ class ExtractWikiContent:
                         if len(parts) == 1:
                             continue
                         name = parts[0]
-                        ## KeyError: 'California (until January 6'
-                        parts_state = parts[1].split(",")
-                        state = parts_state[0]
+                        state = re.sub(r'\s*\(.*$', '', parts[1]).strip()
+                        state = re.sub(r'\s+', ' ', state)
                         map_type = 'Majority' if idx == 0 else 'Minority'
                         ex_data[map_type].append((name, state))
                         
             committees[i].append(ex_data)
         return committees
+    
+    def valid_committee(self, soup, congress_number="119") -> bool:
+        expected = f"{congress_number}th Congress"
+
+        for h2 in soup.find_all("h2"):
+            text = h2.get_text(" ", strip=True)
+            if expected in text:
+                return True
+
+        for h3 in soup.find_all("h3"):
+            text = h3.get_text(" ", strip=True)
+            if expected in text:
+                return True
+
+        return False
 
     def get_abbriv(self, state: str) ->str:
         return STATE_ABBREVIATIONS[state]
+
+
+

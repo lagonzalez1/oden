@@ -60,47 +60,6 @@ async def health_check():
     }
 
 
-@doc_router.get("/data", summary="Scan all rows in the documents table")
-async def scan_documents(
-    session: PostgresDep,
-    limit: int = Query(100, ge=1, le=1000),
-    offset: int = Query(0, ge=0),
-    # Optional: allow filtering by specific fields
-    filing_year: int | None = None,
-    state_dst: str | None = None
-):
-    """ Performs a scan of the documents table with optional pagination and filtering. """
-    repo = _postgres_service(session, "documents", "oden", "doc_id")
-    
-    filters = {}
-    if filing_year:
-        filters["filing_year"] = filing_year
-    if state_dst:
-        filters["state_dst"] = state_dst
-
-    rows = await repo.get_table(**filters)
-    return {
-        "count": len(rows),
-        "limit": limit,
-        "offset": offset,
-        "data": rows
-    }
-
-@doc_router.post("/update_data_test", summary="Update data given id")
-async def update_data(
-    uow: UoWDep,
-    update: DocumentUpdateRequest
-):
-    """ Performs a scan of the documents table with optional pagination and filtering. """
-    dict_data = update.update_data.model_dump(exclude_none=True) if update.update_data else {}
-    repo = _postgres_service(session, "documents", "oden", "doc_id")
-    service = DocumentsService(uow)
-    # get_table is inherited from your PostgresRepository
-    rows = await service.update(update.doc_id, dict_data)
-    return {
-        "update": rows,
-    }
-
 @doc_router.post("/upload_csv", status_code=status.HTTP_201_CREATED)
 async def upload_documents_csv(
     uow: UoWDep,
@@ -252,7 +211,7 @@ neo4j_router = APIRouter(prefix="/graph", tags=["Neo4j"])
 
 
 @neo4j_router.get("/sync", summary="List all nodes with a given label")
-async def list_nodes(
+async def sync(
     session: Neo4jDep,
     uow: UoWDep,
 ):
@@ -264,9 +223,32 @@ async def list_nodes(
 
 
     committees = await service.get_committees()
-    print(f"Committee size: {len(committees)}")
     committees_rel = await service.get_committees_relationships()
-    print(f"committees_rel size: {len(committees_rel)}")
+    if committees:
+        cnt = await graph_service.create_committee(committees)
+        cnt_members = await graph_service_com.merge_committee_member(committees_rel)
+
+    return {
+        "committees": cnt,
+        "committee_members": cnt_members
+    }
+
+
+
+@neo4j_router.get("/sync_house", summary="List all nodes with a given label")
+async def sync_house(
+    session: Neo4jDep,
+    uow: UoWDep,
+):
+    graph_base = _neo4j_service(session, "Committee", "base")
+    graph_base_committee = _neo4j_service(session, "Committee", "committee")
+    service = CommitteeService(uow)
+    graph_service = GraphService(graph_base)
+    graph_service_com = GraphService(graph_base_committee)
+
+
+    committees = await service.get_committees({"chamber": "house"})
+    committees_rel = await service.get_committees_relationships(chamber='house')
     if committees:
         cnt = await graph_service.create_committee(committees)
         cnt_members = await graph_service_com.merge_committee_member(committees_rel)
@@ -278,11 +260,13 @@ async def list_nodes(
 
 
 @neo4j_router.get("/{node_id}", summary="Get a node by element ID")
-async def get_node(label: str, node_id: str, session: Neo4jDep):
-    svc = _neo4j_service(session, label)
-    node = await svc.get(node_id)
-    if not node:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
+async def get_node(
+    session: Neo4jDep,
+    uow: UoWDep,
+):
+    graph_base = _neo4j_service(session, "Committee", "base")
+    graph_service = GraphService(graph_base)
+    node = await graph_service.get_node_by_id(id="4:29561153-f3c1-4ee0-925e-b643cf1d1018:409")
     return node
 
 

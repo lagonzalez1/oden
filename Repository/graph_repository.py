@@ -151,8 +151,6 @@ class TransactionRepository(Neo4jRepository):
                 p.created_at = datetime()
             SET 
                 p.status = $status,
-                p.state_district = $state_district,
-                p.state = $state,
                 p.last_updated = datetime()
             
             RETURN p.bioguide_id as bioguide_id

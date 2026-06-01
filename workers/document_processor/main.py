@@ -20,6 +20,7 @@ from Repository.documents_repository import DocumentRepository
 from Repository.graph_repository import TransactionRepository
 from Core.SqlAlchemyUnitOfWork import SqlAlchemyUnitOfWork
 from functools import wraps
+from Service.commitee_service import CommitteeService
 from Service.document_service import DocumentsService
 from Service.graph_service import GraphService as GraphService
 from Downloads.DownloadFile import DownloadFile 
@@ -39,6 +40,10 @@ logger = logging.getLogger(__name__)
 # from rabbit_client import rabbitmq_client, RabbitMQConfig
 builder = PromptBuilder()
 
+
+def _postgres_service_committee(session: Any)->CommitteeService:
+    uow = SqlAlchemyUnitOfWork(session)
+    return CommitteeService(uow)
 
 def _postgres_service(session: Any)->DocumentsService:
     uow = SqlAlchemyUnitOfWork(session)
@@ -138,24 +143,13 @@ async def extract_llm_content_with_fallback(content: bytes, text_content: str) -
         logger.warning(f"Local model failed: {e}")
     except Exception as e:
         logger.warning(f"Fallback model failed: {e}")
-    try:
-        if not content:
-            return None
-        response = await process_text_vision(content)
-        if response and isinstance(response, dict):
-            return response
-        return None
-    except Exception as e:
-        logger.warning(f"Local model failed: {e}")
-    except Exception as e:
-        logger.warning(f"Fallback model failed: {e}")
-    
-    raise RuntimeError("Both primary and fallback LLM extraction failed")
+
 
 async def process_document_task(body, message: aio_pika.IncomingMessage, postgres_session, neo4j_session) -> bool:
     """ Pika context manager for processing messages ack or non-ack."""
     document_service = _postgres_service(postgres_session)
     neo4j_service = _neo4j_service(neo4j_session)
+    committee_service = _postgres_service_committee(postgres_session)
     try:
         if isinstance(body, dict):
             doc = body
@@ -176,11 +170,11 @@ async def process_document_task(body, message: aio_pika.IncomingMessage, postgre
                 if content:
                     row = content.get("transactions", [])
                     first_name, last_name, state_district = content.get("first_name"), content.get("last_name"), content.get("state_district")
-                    bioguide_id = str("H" + first_name[:2].upper() + last_name[:2].upper() + state_district[:2].upper())
+                    bioguide_id = f"H{state_district[:2].upper()}:{first_name[:2].upper()}:{last_name[:2].upper()}"
                     txs = [{**trades, "id": str(uuid.uuid4())} for trades in row]
                     content['transactions'] = txs
                     content['bioguide_id'] = bioguide_id
-                    await successfull_extraction_save(doc_id, content, len(text), document_service, neo4j_service)
+                    await successfull_extraction_save(doc_id, content, len(text), document_service, neo4j_service, committee_service)
                     return True
 
         await failed_extraction(doc_id, document_service)
@@ -195,7 +189,7 @@ async def transactions_parsed(content: Dict[str, Any]) -> Optional[List[Dict[str
     processor = ProcessFinancials(content)
     return await processor.process_row()
 
-async def successfull_extraction_save(doc_id: str, content: Dict[str, Any], doc_size: Optional[int], document_service, neo4j_service):
+async def successfull_extraction_save(doc_id: str, content: Dict[str, Any], doc_size: Optional[int], document_service, neo4j_service, committee_service):
     try:
         update = { 'doc_id_parsed': True, 'processed_status': "SUCCESS", 
                 "last_updated_date": datetime.now(), "last_updated_date": datetime.now(), 'doc_size': doc_size}
@@ -206,8 +200,8 @@ async def successfull_extraction_save(doc_id: str, content: Dict[str, Any], doc_
         if tx is not None:
             await document_service.create_transaction_gains(data=tx)
 
-        await document_service.upset_legislator(content)
-        await document_service.update_extractions(doc_id, update)
+        document = await document_service.update_extractions(doc_id, update)
+        ## Find in db return the legislator id ? push into graph 
         await neo4j_service.ingest_filing(content)
         
     except Exception as e:

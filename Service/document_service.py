@@ -244,30 +244,35 @@ class DocumentsService:
             async with self.uow:
                 wiki = ExtractWikiContent()
                 committee_members = wiki.fetch_all_members()
+                committee_psql = await self.uow.committee.get_table(filters={"chamber": "house"})
+                committee_ = {}
+                for row in committee_psql:
+                    title = " ".join(row["title"].split()).upper()
+                    committee_[title] = dict(row)
+                print(len(committee_members))
                 for row in committee_members:
-                    if row[0] is None or row[1] is None:
+                    if len(row) != 4:
+                        print(row)
                         continue
-                    committee_map, chair_map, ranking_map, members_map = row[0], row[1], row[2], dict(row[3])
+                    committee_map, chair_map, ranking_map, members_map = dict(row[0]), row[1], row[2], dict(row[3])
                     # 2. Perform the update via the repo attached to the UoW
-                    committee_psql = await self.uow.committee.get_by_col('title', committee_map.get("text"))
-                    if committee_psql:
-                        for k, v in members_map.items():
-                            for name, state in v:
-                                full_name = name.split(" ")
-                                first = full_name[0].upper()
-                                last = full_name[1].upper()
-                                state = wiki.get_abbriv(state).upper()
-                                bioguide_id = f"H{first[:2]}{last[:2]}{state}"
-                                data = { "bioguide_id": bioguide_id,"first_name": first, "last_name": last, 
-                                        "party": "NA", "state": state, "chamber": "House", "is_active": True }
-                                legislator_record = await self.uow.legislator.upsert(data, 'bioguide_id')
-                                if legislator_record:
-                                    merge_record = await self.uow.committee_membership.merge_membership(committee_psql['id'], legislator_record['id'], "Member", None, False, None)
-                                    if merge_record:
-                                        cnt += 1
-                                
-                await self.uow.commit()
-                return cnt
+                    committee_title = " ".join(committee_map['text'].split()).upper()
+                    print(f"Committee {committee_title}")
+                    for k, v in members_map.items():
+                        party = "Republican" if k == "Majority" else "Democrat"
+                        for name, state in v:
+                            parts = name.split()
+                            first = parts[0].upper()
+                            last = parts[-1].upper()
+                            st = wiki.get_abbriv(state).upper()
+                            bioguide_id = f"H{st}:{first[:2]}:{last[:2]}"
+                            data = { "bioguide_id": bioguide_id,"first_name": first, "last_name": last, 
+                                    "party": party, "state": st, "chamber": "house", "is_active": True }
+                            legislator_record = await self.uow.legislator.upsert(data, 'bioguide_id')
+                            await self.uow.committee_membership.merge_membership(str(committee_[committee_title]['id']), str(legislator_record['id']), "Member", None, False, None)
+                            cnt += 1              
+                            await self.uow.commit()
+            return cnt
         except Exception as e:
             # The UoW __aexit__ will handle the rollback, 
             # but we log the error here for the Service context.

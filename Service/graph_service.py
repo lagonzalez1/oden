@@ -29,6 +29,10 @@ class GraphService(Generic[T]):
         result = await self._repo.get_assets()
         return result
 
+    async def get_node_by_id(self, id):
+        filer = await self._repo.get_by_id(record_id=id)
+        return filer
+
     # ── Write ─────────────────────────────────────────────────────────────────
 
     async def ingest_filing(self, llm_content: Dict[str, Any]) -> str:

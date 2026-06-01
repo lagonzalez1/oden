@@ -50,20 +50,21 @@ class CommitteeService:
 
     # ── Read ──────────────────────────────────────────────────────────────────
 
-    async def get_committees(self)->List[Dict[str, any]]:
+
+    async def get_committees(self, filter: Dict)->List[Dict[str, any]]:
         try:
             async with self.uow:
-                rows = await self.uow.committee.get_table()
+                rows = await self.uow.committee.get_table(filters=filter)
                 self.uow.commit()
                 return rows
         except Exception as e:
             logger.info(f"[Get committee error]: error: {e}")
             raise
     
-    async def get_committees_relationships(self)->List[Dict[str, any]]:
+    async def get_committees_relationships(self, chamber="Senate")->List[Dict[str, any]]:
         try:
             async with self.uow:
-                rows = await self.uow.committee_membership.get_committee_membership()
+                rows = await self.uow.committee_membership.get_committee_membership(chamber)
                 self.uow.commit()
                 return rows
         except Exception as e:
