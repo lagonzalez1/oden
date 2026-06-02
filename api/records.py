@@ -2,7 +2,7 @@
 Example endpoints — swap `BaseService` / `PostgresRepository` for your
 domain-specific service and repo when you extend the project.
 """
-from typing import Any
+from typing import Any, Optional
 from fastapi import APIRouter, HTTPException, Query, status, UploadFile, File
 from Core.dependencies import Neo4jDep, UoWDep, PostgresDep
 from Repository.documents_repository import DocumentRepository
@@ -11,7 +11,7 @@ from Service.document_service import DocumentsService
 from Service.stock_gain_service import StockGainsService
 from Service.commitee_service import CommitteeService
 from Service.graph_service import GraphService
-from Schema.base_schema import DocumentUpdateRequest, IngestRequest, MonitorChangesRequest, GetAssociatedTransactions, GetPerformanceRequest
+from Schema.base_schema import DocumentUpdateRequest, IngestRequest, MonitorChangesRequest, GetAssociatedTransactions
 router = APIRouter()
 
 
@@ -259,15 +259,46 @@ async def sync_house(
     }
 
 
-@neo4j_router.get("/{node_id}", summary="Get a node by element ID")
+@neo4j_router.get("/legislators")
+async def get_legislators(
+    session: Neo4jDep,
+    label: str = Query(...),
+    node_id: Optional[str] = Query(None),
+    first_name: Optional[str] = Query(None),
+    last_name: Optional[str] = Query(None),
+):
+    graph_base = _neo4j_service(
+        session,
+        label=label,
+        repo_type="base"
+    )
+    graph_service = GraphService(graph_base)
+    if node_id:
+        return await graph_service.get_node_by_id(node_id)
+    return await graph_service.search(
+        first_name=first_name,
+        last_name=last_name
+    )
+
+
+
+@neo4j_router.get("/node")
 async def get_node(
     session: Neo4jDep,
-    uow: UoWDep,
+    node_id: Optional[str] = Query(None),
 ):
-    graph_base = _neo4j_service(session, "Committee", "base")
+    graph_base = _neo4j_service(
+        session,
+        label="",
+        repo_type="base"
+    )
     graph_service = GraphService(graph_base)
-    node = await graph_service.get_node_by_id(id="4:29561153-f3c1-4ee0-925e-b643cf1d1018:409")
-    return node
+    if node_id:
+        node = await graph_service.get_node_by_id(node_id)
+        return node
+    
+
+
 
 
 

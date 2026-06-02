@@ -4,6 +4,7 @@ from Config.settings import settings
 from Database.postgres import postgres_db
 from Database.neo4j_ import neo4j_db
 from Router.api import api_router
+from fastapi.middleware.cors import CORSMiddleware
 from MessageBroker.rabbitmq_client import RabbitMQConfig, rabbitmq_client
 
 @asynccontextmanager
@@ -38,6 +39,14 @@ app = FastAPI(
     description="FastAPI service with PostgreSQL and Neo4j",
     lifespan=lifespan,
 )
+app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:5173"],  # Vite dev server
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
 
 app.include_router(api_router, prefix="/api")
 

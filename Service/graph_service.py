@@ -32,6 +32,11 @@ class GraphService(Generic[T]):
     async def get_node_by_id(self, id):
         filer = await self._repo.get_by_id(record_id=id)
         return filer
+    
+    async def search(self, first_name: str = None, last_name: str = None):
+        body = { "first_name": first_name, "last_name": last_name }
+        filer = await self._repo.search(body)
+        return filer
 
     # ── Write ─────────────────────────────────────────────────────────────────
 
@@ -93,3 +98,12 @@ class GraphService(Generic[T]):
     async def delete(self, record_id: Any) -> bool:
         """Delete a record; returns True if it existed."""
         return await self._repo.delete(record_id)
+    
+
+    # ── Node transform ─────────────────────────────────────────────────────────────────
+    async def to_dto(self, node: dict)->dict:
+        return {
+            "id": node.get("id"),
+            "type": list(node.get("labels"))[0],
+            "data": node
+        }

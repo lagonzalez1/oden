@@ -4,6 +4,7 @@ from typing import Any, Generic, Sequence, TypeVar, Dict, List, Optional
 import uuid
 from neo4j import AsyncSession as Neo4jSession
 from datetime import datetime
+from Schema.graph_schema import NodeDTO
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -53,6 +54,33 @@ class Neo4jRepository(AbstractRepository[T]):
     
         # ── Implement required abstract methods ──────────────────────────────────
 
+    async def search(self, filters: dict) -> Sequence[T]:
+        conditions = []
+        params = {}
+
+        for key, value in filters.items():
+            conditions.append(
+                f"toLower(n.{key}) CONTAINS toLower(${key})"
+            )
+            params[key] = value
+
+        where_clause = ""
+        if conditions:
+            where_clause = "WHERE " + " AND ".join(conditions)
+
+        cypher = f"""
+            MATCH (n:{self.label})
+            {where_clause}
+            RETURN elementId(n) AS id, n
+        """
+
+        result = await self._session.run(cypher, **params)
+
+        records = await result.data()
+
+        return [ {**record["n"], "id": {record["id"]}} for record in records]
+
+
     async def get_assets(self)->List[Dict[str, Any]]:
         cypher = """
             MATCH(a:Asset)
@@ -87,12 +115,23 @@ class Neo4jRepository(AbstractRepository[T]):
         # Transform Neo4j records to your T type as needed
         return [record[0] for record in records] if records else []
 
-    async def get_by_id(self, record_id: Any) -> T | None:
-        """Get node by ID."""
-        cypher = f"MATCH (n:{self.label} {{id: $id}}) RETURN n"
+    async def get_by_id(self, record_id: str) -> NodeDTO | None:
+        cypher = """
+        MATCH (n)
+        WHERE elementId(n) = $id
+        RETURN elementId(n) AS id, n
+        """
+
         result = await self._session.run(cypher, id=record_id)
         record = await result.single()
-        return record[0] if record else None
+
+        if not record:
+            return None
+
+        node = record["n"]
+        element_id = record["id"]
+
+        return self.to_dto(node, element_id)
 
     async def create(self, data: dict[str, Any]) -> T:
         """Create a new node."""
@@ -132,6 +171,13 @@ class Neo4jRepository(AbstractRepository[T]):
         record = await result.single()
         return record["deleted"] > 0 if record else False
 
+
+    def to_dto(self, node, element_id: str):
+        return NodeDTO(
+            id=element_id,
+            type=list(node.labels)[0],
+            data=dict(node)
+        )
 
 class TransactionRepository(Neo4jRepository):
     """ Repository for Transaction data"""
