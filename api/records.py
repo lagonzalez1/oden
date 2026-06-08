@@ -12,6 +12,7 @@ from Service.stock_gain_service import StockGainsService
 from Service.commitee_service import CommitteeService
 from Service.graph_service import GraphService
 from Schema.base_schema import DocumentUpdateRequest, IngestRequest, MonitorChangesRequest, GetAssociatedTransactions
+from Schema.graph_schema import GraphDTO
 router = APIRouter()
 
 
@@ -60,38 +61,12 @@ async def health_check():
     }
 
 
-@doc_router.post("/upload_csv", status_code=status.HTTP_201_CREATED)
-async def upload_documents_csv(
-    uow: UoWDep,
-    file: UploadFile = File(...)
-):
-    """ Upload a CSV file to populate the documents table. """
-    if not file.filename.endswith('.csv'):
-        raise HTTPException(
-            status_code=400, 
-            detail="Invalid file extension. Please upload a .csv file."
-        )
-    service = DocumentsService(uow)
-    try:
-        count = await service.process_document_csv(file=file)
-        return {
-            "message": "CSV processed successfully",
-            "rows_inserted": count,
-            "filename": file.filename
-        }
-    except Exception as e:
-        # In a real app, you'd log this error
-        raise HTTPException(
-            status_code=500, 
-            detail=f"Error processing CSV: {str(e)}"
-        )
-
 
 @doc_router.get("/ingest_commitees", summary="Find committee info.", status_code=status.HTTP_201_CREATED)
 async def ingest_committees(
     uow: UoWDep,
 ):
-    """ Get unprocesses documents, simple Boolean check for now, but in the future date check will work best. """
+    """ Create committees based on xml files for senate. """
     service = CommitteeService(uow)
     count = await service.ingest_committee_data()
     
@@ -210,7 +185,7 @@ async def get_client_performance(
 neo4j_router = APIRouter(prefix="/graph", tags=["Neo4j"])
 
 
-@neo4j_router.get("/sync", summary="List all nodes with a given label")
+@neo4j_router.get("/sync_senate", summary="List all nodes with a given label")
 async def sync(
     session: Neo4jDep,
     uow: UoWDep,
@@ -222,7 +197,7 @@ async def sync(
     graph_service_com = GraphService(graph_base_committee)
 
 
-    committees = await service.get_committees()
+    committees = await service.get_committees(filter={"chamber": "Senate"})
     committees_rel = await service.get_committees_relationships()
     if committees:
         cnt = await graph_service.create_committee(committees)
@@ -276,8 +251,8 @@ async def get_legislators(
     if node_id:
         return await graph_service.get_node_by_id(node_id)
     return await graph_service.search(
-        first_name=first_name,
-        last_name=last_name
+        first_name=first_name.upper(),
+        last_name=last_name.upper()
     )
 
 
@@ -295,7 +270,8 @@ async def get_node(
     graph_service = GraphService(graph_base)
     if node_id:
         node = await graph_service.get_node_by_id(node_id)
-        return node
+        return GraphDTO(nodes=[node], edges=[])
+        
     
 
 

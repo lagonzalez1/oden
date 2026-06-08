@@ -170,7 +170,8 @@ async def process_document_task(body, message: aio_pika.IncomingMessage, postgre
                 if content:
                     row = content.get("transactions", [])
                     first_name, last_name, state_district = content.get("first_name"), content.get("last_name"), content.get("state_district")
-                    bioguide_id = f"H{state_district[:2].upper()}:{first_name[:2].upper()}:{last_name[:2].upper()}"
+                    print("CHAGNES")
+                    bioguide_id = f"H{state_district[:2].upper()}:{first_name[:3].upper()}:{last_name.upper()}"
                     txs = [{**trades, "id": str(uuid.uuid4())} for trades in row]
                     content['transactions'] = txs
                     content['bioguide_id'] = bioguide_id
@@ -194,13 +195,14 @@ async def successfull_extraction_save(doc_id: str, content: Dict[str, Any], doc_
         update = { 'doc_id_parsed': True, 'processed_status': "SUCCESS", 
                 "last_updated_date": datetime.now(), "last_updated_date": datetime.now(), 'doc_size': doc_size}
         logger.info(f"[successfull_extraction_save] content: {content}")
-        tx = await transactions_parsed(content)
+        ##tx = await transactions_parsed(content)
 
-        logger.info(f"[transactions_parsed] response {tx}")
-        if tx is not None:
-            await document_service.create_transaction_gains(data=tx)
+        ##logger.info(f"[transactions_parsed] response {tx}")
+        ##if tx is not None:
+            
+            ##await document_service.create_transaction_gains(data=tx)
 
-        document = await document_service.update_extractions(doc_id, update)
+        await document_service.update_extractions(doc_id, update)
         ## Find in db return the legislator id ? push into graph 
         await neo4j_service.ingest_filing(content)
         

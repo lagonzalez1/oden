@@ -108,7 +108,7 @@ class DocumentsService:
         async with self.uow:
             for row in csv_reader:
                 doc_id = row.get("DocID")
-                found = await self.uow.documents.get_by_id(doc_id)
+                found = await self.uow.documents.get_by_id(str(doc_id))
                 await self.uow.commit()
                 if found:
                     continue
@@ -265,7 +265,7 @@ class DocumentsService:
                             first = parts[0].upper()
                             last = parts[-1].upper()
                             st = wiki.get_abbriv(state).upper()
-                            bioguide_id = f"H{st}:{first[:2]}:{last[:2]}"
+                            bioguide_id = f"H{st}:{first[:3]}:{last}"
                             data = { "bioguide_id": bioguide_id,"first_name": first, "last_name": last, 
                                     "party": party, "state": st, "chamber": "house", "is_active": True }
                             legislator_record = await self.uow.legislator.upsert(data, 'bioguide_id')

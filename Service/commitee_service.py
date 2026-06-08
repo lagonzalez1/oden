@@ -105,7 +105,8 @@ class CommitteeService:
                                 first_name, last_name = member.find("name/first").text, member.find("name/last").text
                                 state, party = member.findtext("state"), member.findtext("party")
                                 position = member.findtext("position")
-                                legislator_query = { "bioguide_id": f"{state}:{party}:{first_name[0]}:{last_name[0]}", "first_name": first_name, 
+                                bioguide_id = f"S{state}:{first_name[:3]}:{last_name}"
+                                legislator_query = { "bioguide_id": bioguide_id.upper(), "first_name": first_name, 
                                                     "last_name": last_name, "party": party, "state": state, "chamber": "Senate", "leadership_role": position}
                                 legislator_insert = await self.uow.legislator.upsert(
                                     data=legislator_query,
@@ -131,7 +132,9 @@ class CommitteeService:
                                     first_name, last_name = member.find("name/first").text, member.find("name/last").text
                                     state, party = member.findtext("state"), member.findtext("party")
                                     position = member.findtext("position")
-                                    sub_legislator_query = { "bioguide_id": f"{state}:{party}:{first_name[0]}:{last_name[0]}", "first_name": first_name, 
+                                    bioguide_id = f"S{state}:{first_name[:3]}:{last_name}"
+
+                                    sub_legislator_query = { "bioguide_id": bioguide_id.upper(), "first_name": first_name, 
                                                             "last_name": last_name, "party": party, "state": state, "chamber": "Senate", "leadership_role": position}
                                     sub_legislator_insert = await self.uow.legislator.upsert(
                                         data=sub_legislator_query,

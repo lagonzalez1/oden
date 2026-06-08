@@ -138,6 +138,7 @@ CREATE TABLE IF NOT EXISTS oden.legislator (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+alter table oden.legislator ALTER COLUMN bioguide_id TYPE VARCHAR(30);
 
 CREATE TABLE IF NOT EXISTS oden.committee_membership (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

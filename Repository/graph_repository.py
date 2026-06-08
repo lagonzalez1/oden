@@ -214,7 +214,7 @@ class TransactionRepository(Neo4jRepository):
                 **params
             )
             record = await result.single()
-            return record["id"]
+            return record["bioguide_id"]
         except Exception as e:
                 logger.info(f"[GRAPH_REPO] Error merge_filer: {e}")
                 raise e
