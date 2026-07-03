@@ -84,7 +84,7 @@ class CommitteeService:
             return root
 
     async def ingest_committee_data(self) ->None:
-        """ Ingest all senate committees and its members. Writes to DB."""
+        """ Ingest all SENATE committees and its members. Writes to DB."""
         try:
             legislator_insert_cnt = 0
             committee_insert_cnt = 0

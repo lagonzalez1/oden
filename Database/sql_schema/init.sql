@@ -119,6 +119,10 @@ CREATE TABLE IF NOT EXISTS oden.committee (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+ALTER TABLE oden.committee ADD COLUMN IF NOT EXISTS jurisdiction TEXT;
+ALTER TABLE oden.committee ADD COLUMN IF NOT EXISTS roles TEXT;
+ALTER TABLE oden.committee ADD COLUMN IF NOT EXISTS actions TEXT;
+ALTER TABLE oden.committee ADD COLUMN IF NOT EXISTS rules TEXT;
 
 
 CREATE TABLE IF NOT EXISTS oden.legislator (

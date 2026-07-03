@@ -195,12 +195,11 @@ async def successfull_extraction_save(doc_id: str, content: Dict[str, Any], doc_
         update = { 'doc_id_parsed': True, 'processed_status': "SUCCESS", 
                 "last_updated_date": datetime.now(), "last_updated_date": datetime.now(), 'doc_size': doc_size}
         logger.info(f"[successfull_extraction_save] content: {content}")
-        ##tx = await transactions_parsed(content)
+        tx = await transactions_parsed(content)
 
-        ##logger.info(f"[transactions_parsed] response {tx}")
-        ##if tx is not None:
-            
-            ##await document_service.create_transaction_gains(data=tx)
+        logger.info(f"[transactions_parsed] response {tx}")
+        if tx is not None:
+            await document_service.create_transaction_gains(data=tx)
 
         await document_service.update_extractions(doc_id, update)
         ## Find in db return the legislator id ? push into graph 

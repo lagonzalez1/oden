@@ -37,6 +37,7 @@ class ProcessFinancials:
                 "doc_id":                    self.content["filing_id"],
                 "filer_name":                self.content["name"],
                 "ticker":                    tx["ticker"],
+                "description":               self._fetch_description(tx["ticker"]),
                 "asset_type":                tx["asset_type"],
                 "transaction_type":          tx["transaction_type"],
                 "trade_date":                self._parse_date(tx["transaction_date"]),
@@ -147,6 +148,15 @@ class ProcessFinancials:
         if not hist.empty:
             hist.index = hist.index.tz_localize(None)
         return hist
+    
+    def _fetch_description(self, ticker: str) -> Optional[str]:
+        """Fetches the company description from yfinance."""
+        try:
+            stock = yf.Ticker(ticker)
+            info = stock.info
+            return info.get("longBusinessSummary") or info.get("shortBusinessSummary")
+        except Exception:
+            return None
 
     # ── Performance ───────────────────────────────────────────────────────────
 

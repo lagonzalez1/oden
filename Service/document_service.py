@@ -7,6 +7,8 @@ from Core.unit_of_work import AbstractUnitOfWork
 from typing import Any, TypeVar, List, Dict, Optional
 from MessageBroker.rabbitmq_client import rabbitmq_client
 from Extract_external.main import ExtractWikiContent
+from Extract_external.main2 import HouseCommitteeParser
+from Embeddings.main import EmbeddingService
 import logging
 import zipfile
 import requests
@@ -234,10 +236,28 @@ class DocumentsService:
             logger.error(f"[Document Service] Update failed for {record_id}: {e}")
             raise e
     
+    async def create_committee_content(self) -> T | None:
+        """Create the committee with return its id*  """
+        try:
+            cnt = 0
+            # 1. Open the transaction boundary, 
+            async with self.uow:
+               
+               parser = HouseCommitteeParser(congress_number="119")
+               committees = parser.parse_all()
+
+
+
+                
+            return cnt
+        except Exception as e:
+            # The UoW __aexit__ will handle the rollback, 
+            # but we log the error here for the Service context.
+            logger.error(f"[Document Service] Update failed for: {e}")
+            raise e
 
     async def upsert_legislator_from_wiki(self) -> T | None:
         """Create a legislator(HOUSE) if not exist (upsert idempodent), then create the linkage from commitee"""
-
         try:
             cnt = 0
             # 1. Open the transaction boundary, 
@@ -249,15 +269,12 @@ class DocumentsService:
                 for row in committee_psql:
                     title = " ".join(row["title"].split()).upper()
                     committee_[title] = dict(row)
-                print(len(committee_members))
                 for row in committee_members:
                     if len(row) != 4:
-                        print(row)
                         continue
                     committee_map, chair_map, ranking_map, members_map = dict(row[0]), row[1], row[2], dict(row[3])
                     # 2. Perform the update via the repo attached to the UoW
                     committee_title = " ".join(committee_map['text'].split()).upper()
-                    print(f"Committee {committee_title}")
                     for k, v in members_map.items():
                         party = "Republican" if k == "Majority" else "Democrat"
                         for name, state in v:
@@ -272,6 +289,76 @@ class DocumentsService:
                             await self.uow.committee_membership.merge_membership(str(committee_[committee_title]['id']), str(legislator_record['id']), "Member", None, False, None)
                             cnt += 1              
                             await self.uow.commit()
+            return cnt
+        except Exception as e:
+            # The UoW __aexit__ will handle the rollback, 
+            # but we log the error here for the Service context.
+            logger.error(f"[Document Service] Update failed for: {e}")
+            raise e
+        
+    async def create_house_committee(self) -> T | None:
+        """Create a legislator(HOUSE) if not exist (upsert idempodent), then create the linkage from commitee"""
+        try:
+            cnt = 0
+            # 1. Open the transaction boundary, 
+            async with self.uow:
+                wiki = HouseCommitteeParser(congress_number="119")
+                embedding_service = EmbeddingService()
+                committees = wiki.parse_all()
+
+                for i in range(0, len(committees)):
+                    committee = committees[i]
+                    committee_id = wiki.generate_md5_hash(committee.name)
+                    data = { "title": committee.name, "committee_id": committee_id ,"chamber": "house", "jurisdiction": committee.profile.jurisdiction, "roles": committee.profile.role, "rules": committee.profile.rules, "parent_committee_id": None}
+                    embedding_content = f"{committee.name} {committee.profile.jurisdiction} {committee.profile.role} {committee.profile.rules}"
+                    committee_record = await self.uow.committee.upsert(data, 'committee_id')
+                    embedding_vector = await embedding_service.embed(embedding_content)
+                    await self.uow.committee.update_embedding(str(committee_record['id']), embedding_vector)
+                    for member in committee.members:
+                        party = member.party
+                        name_parts = member.name.split()
+                        if len(name_parts) < 2:
+                            continue  # Skip if the name doesn't have at least two parts
+                        first = name_parts[0].upper()
+                        last = name_parts[-1].upper()
+                        st = member.state.upper()
+                        state = wiki._abbrev(st).upper()
+                        bioguide_id = f"H{st}:{first[:3]}:{last}"
+                        data = { "bioguide_id": bioguide_id,"first_name": first, "last_name": last, 
+                                "party": party, "state": state, "chamber": "house", "is_active": True }
+                        legislator_record = await self.uow.legislator.upsert(data, 'bioguide_id')
+                        await self.uow.committee_membership.merge_membership(str(committee_record['id']), str(legislator_record['id']), member.role, None, False, None)
+                        cnt += 1              
+                        await self.uow.commit()
+                    
+                    for subcommittee in committee.subcommittees:
+                        committee_id = wiki.generate_md5_hash(subcommittee.name)
+                        data = { "title": subcommittee.name, "chamber": "house", "committee_id": committee_id, "jurisdiction": subcommittee.profile.jurisdiction, "roles": subcommittee.profile.role, "rules": subcommittee.profile.rules, "parent_committee_id": str(committee_record['id']) }
+                        subcommittee_record = await self.uow.committee.upsert(data, 'committee_id')
+                        embedding_content = f"{committee.name} {committee.profile.jurisdiction} {committee.profile.role} {committee.profile.rules}"
+                        committee_record = await self.uow.committee.upsert(data, 'committee_id')
+                        embedding_vector = await embedding_service.embed(embedding_content)
+                        await self.uow.committee.update_embedding(str(committee_record['id']), embedding_vector)
+                        
+                        await self.uow.committee_membership.merge_membership(str(committee_record['id']), str(subcommittee_record['id']), "Subcommittee", None, False, None)
+                        for member in subcommittee.members:
+                            party = member.party
+                            name_parts = member.name.split()
+                            if len(name_parts) < 2:
+                                continue  # Skip if the name doesn't have at least two parts
+                            first = name_parts[0].upper()
+                            last = name_parts[-1].upper()
+                            st = member.state.upper()
+                            state = wiki._abbrev(st).upper()
+                            bioguide_id = f"H{st}:{first[:3]}:{last}"
+                            data = { "bioguide_id": bioguide_id,"first_name": first, "last_name": last, 
+                                    "party": party, "state": state, "chamber": "house", "is_active": True }
+                            legislator_record = await self.uow.legislator.upsert(data, 'bioguide_id')
+                            await self.uow.committee_membership.merge_membership(str(subcommittee_record['id']), str(legislator_record['id']), member.role, None, False, None)
+                            cnt += 1              
+                            await self.uow.commit()
+                
+                
             return cnt
         except Exception as e:
             # The UoW __aexit__ will handle the rollback, 

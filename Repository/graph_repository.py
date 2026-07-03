@@ -4,7 +4,7 @@ from typing import Any, Generic, Sequence, TypeVar, Dict, List, Optional
 import uuid
 from neo4j import AsyncSession as Neo4jSession
 from datetime import datetime
-from Schema.graph_schema import NodeDTO
+from Schema.graph_schema import NodeDTO, GraphDTO, EdgeDTO, neo4j_to_dict
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -80,6 +80,91 @@ class Neo4jRepository(AbstractRepository[T]):
 
         return [ {**record["n"], "id": {record["id"]}} for record in records]
 
+    async def get_committee(self, committee: Optional[str] = None) -> GraphDTO | None:
+        conditions = []
+        params = {}
+
+        if committee:
+            conditions.append("toLower(c.chamber) CONTAINS toLower($committee)")
+            params["committee"] = committee
+
+        where_clause = ""
+        if conditions:
+            where_clause = "WHERE " + " AND ".join(conditions)
+
+        cypher = f"""
+            MATCH (c:Committee)
+            OPTIONAL MATCH (c)<-[r:IS_MEMBER_OF]-(m:Member)
+            {where_clause}
+            RETURN 
+                c as committee_node,
+                elementId(c) as committee_id,
+                COLLECT(DISTINCT {{
+                    member_node: m,
+                    member_id: coalesce(m.bioguide_id, elementId(m)),
+                    relationship: r,
+                    relationship_id: elementId(r)
+                }}) as members
+        """
+
+        result = await self._session.run(cypher, **params)
+        records = await result.data()
+        
+        nodes = []
+        edges = []
+        node_ids = set()
+        
+        for record in records:
+            committee_node = record["committee_node"]
+            committee_id = record["committee_id"]
+            
+            # Add committee node (once)
+            if committee_id not in node_ids:
+                committee_data = neo4j_to_dict(committee_node)
+                
+                nodes.append(NodeDTO(
+                    id=committee_id,
+                    type="Committee",
+                    data=committee_data
+                ))
+                node_ids.add(committee_id)
+            
+            # Process members
+            for member_info in record["members"]:
+                member_node = member_info["member_node"]
+                
+                # Skip if no member
+                if not member_node:
+                    continue
+                    
+                member_id = member_info["member_id"]
+                relationship = member_info["relationship"]
+                relationship_id = member_info["relationship_id"] or str(uuid.uuid4())
+                
+                # Add member node (once)
+                if member_id not in node_ids:
+                    member_data = neo4j_to_dict(member_node)
+                    
+                    nodes.append(NodeDTO(
+                        id=member_id,
+                        type="Member",
+                        data=member_data
+                    ))
+                    node_ids.add(member_id)
+                
+                # Add edge
+                relationship_data = neo4j_to_dict(relationship)
+                
+                edges.append(EdgeDTO(
+                    id=str(uuid.uuid4()) if not relationship_id else relationship_id,
+                    source=member_id,
+                    target=committee_id,
+                    type="IS_MEMBER_OF",
+                    data=relationship_data
+                ))
+        
+        return GraphDTO(nodes=nodes, edges=edges)
+        
 
     async def get_assets(self)->List[Dict[str, Any]]:
         cypher = """
@@ -123,6 +208,24 @@ class Neo4jRepository(AbstractRepository[T]):
         """
 
         result = await self._session.run(cypher, id=record_id)
+        record = await result.single()
+
+        if not record:
+            return None
+
+        node = record["n"]
+        element_id = record["id"]
+
+        return self.to_dto(node, element_id)
+
+
+    async def get_by_bioguide_id(self, bioguide_id: str) -> NodeDTO | None:
+        cypher = """
+        MATCH (n)
+        WHERE n.bioguide_id = $bioguide_id
+        RETURN elementId(n) AS id, n
+        """
+        result = await self._session.run(cypher, bioguide_id=bioguide_id)
         record = await result.single()
 
         if not record:

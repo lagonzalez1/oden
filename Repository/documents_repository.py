@@ -5,6 +5,7 @@ import sqlalchemy
 from sqlalchemy.ext.asyncio import AsyncSession
 from contextlib import asynccontextmanager
 import logging
+import json
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -150,7 +151,25 @@ class PostgresRepository(AbstractRepository[T]):
         except sqlalchemy.exc.ArgumentError as e:
             logger.error(f"[DocumentRepository Error] error: {e}")
             raise e
-    
+        
+    async def update_embedding(self, committee_id: str, embedding: list[float]) -> Any | None:
+        """Store a computed embedding vector for a committee."""
+        try:
+            query = text(f"""
+                UPDATE {self.full_table_name}
+                SET embedding = :embedding::vector
+                WHERE {self.pk_name} = :id
+                RETURNING *
+            """)
+            result = await self._session.execute(query, {
+                "embedding": json.dumps(embedding),
+                "id": committee_id,
+            })
+            return result.mappings().first()
+        except sqlalchemy.exc.InvalidRequestError as e:
+            logger.error(f"[Committee] update_embedding error: {e}")
+            raise
+
     async def upsert(self, data: dict[str, Any], conflict_column: str) -> Any:
         """
         Insert a row or update on conflict.
@@ -167,7 +186,6 @@ class PostgresRepository(AbstractRepository[T]):
                 for k in data.keys()
                 if k != conflict_column
             )
-
             query = text(f"""
                 INSERT INTO {self.full_table_name} ({columns})
                 VALUES ({values})
@@ -178,7 +196,6 @@ class PostgresRepository(AbstractRepository[T]):
 
             result = await self._session.execute(query, data)
             return result.mappings().first()
-
         except sqlalchemy.exc.InvalidRequestError as e:
             logger.error(f"[{self.table_name}] upsert InvalidRequestError: {e}")
             raise

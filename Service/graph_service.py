@@ -1,8 +1,9 @@
 import logging
 from datetime import datetime
 from Repository.graph_repository import AbstractRepository
-from typing import Any, Generic, TypeVar, Dict, List
+from typing import Any, Generic, TypeVar, Dict, List, Optional
 from MessageBroker.rabbitmq_client import rabbitmq_client
+from Schema.graph_schema import NodeDTO, GraphDTO
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -24,15 +25,25 @@ class GraphService(Generic[T]):
 
     # ── Read ──────────────────────────────────────────────────────────────────
 
+    async def get_committees(self, committee: Optional[str] = None)->GraphDTO | None:
+        """ Retrive all assets withg their linked"""
+        result = await self._repo.get_committee(committee=committee)
+        return result
+
+
     async def get_assets(self)->List[Dict[str, Any]] | None:
         """ Retrive all assets withg their linked"""
         result = await self._repo.get_assets()
         return result
 
     async def get_node_by_id(self, id):
-        filer = await self._repo.get_by_id(record_id=id)
-        return filer
-    
+        by_id_result = await self._repo.get_by_id(record_id=id)
+        if by_id_result is not None:
+            return by_id_result
+
+        by_bioguide_id_result = await self._repo.get_by_bioguide_id(bioguide_id=id)
+        return by_bioguide_id_result
+
     async def search(self, first_name: str = None, last_name: str = None):
         body = { "first_name": first_name, "last_name": last_name }
         filer = await self._repo.search(body)

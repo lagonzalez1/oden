@@ -66,7 +66,7 @@ async def health_check():
 async def ingest_committees(
     uow: UoWDep,
 ):
-    """ Create committees based on xml files for senate. """
+    """ Create committees based senate committee from xml. """
     service = CommitteeService(uow)
     count = await service.ingest_committee_data()
     
@@ -91,9 +91,22 @@ async def ingest_documents(
 async def ingest_legislators(
     uow: UoWDep,
 ):
-    """ Fetch legislators from wiki page using Custom class, upsert linkage from committee_ to member_. """
+    """ Create house committee with members from wiki page, upsert into db. """
     service = DocumentsService(uow)
     cnt = await service.upsert_legislator_from_wiki()
+    return {
+        "processed": cnt,
+    }
+
+
+
+@doc_router.get("/create_house_committee", summary="Check unprocessesed doc_ids, send to queue to process.", status_code=status.HTTP_201_CREATED)
+async def create_house_committee(
+    uow: UoWDep,
+):
+    """ Create house committee with members from wiki page, upsert into db. """
+    service = DocumentsService(uow)
+    cnt = await service.create_house_committee()
     return {
         "processed": cnt,
     }
@@ -255,6 +268,25 @@ async def get_legislators(
         last_name=last_name.upper()
     )
 
+
+
+@neo4j_router.get("/committees")
+async def get_node(
+    session: Neo4jDep,
+    committee: Optional[str] = Query(None),
+    
+):
+    graph_base = _neo4j_service(
+        session,
+        label="",
+        repo_type="base"
+    )
+    graph_service = GraphService(graph_base)
+    if committee:
+        committees = await graph_service.get_committees(committee=committee)
+        return committees
+        
+    
 
 
 @neo4j_router.get("/node")
