@@ -25,3 +25,4 @@ pillow
 pandas
 lxml
 beautifulsoup4
+neontology

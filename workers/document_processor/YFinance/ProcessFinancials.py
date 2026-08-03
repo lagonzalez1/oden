@@ -2,7 +2,7 @@ import asyncio
 import uuid
 import yfinance as yf
 import pandas as pd
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, List
 from datetime import datetime, date, timedelta
 
 
@@ -15,8 +15,30 @@ class ProcessFinancials:
         self._yf_cache: Dict[str, pd.DataFrame] = {}    # ticker -> DataFrame
         self._current_price_cache: Dict[str, float] = {} # ticker -> float
         self._spy_cache: Dict[tuple, float] = {}          # (start, end) -> float
+        self._stock_info_cache: Dict[str, Dict[str, Any]] = {}  # ticker -> stock info
 
     # ── Public ────────────────────────────────────────────────────────────────
+
+    async def process_stock_data(self) -> Optional[List[Dict[str, Any]]]:
+        """
+        Extract unique stock information for the oden.stock table.
+        Returns a list of stock data dicts matching the stock table schema.
+        """
+        stock_data = []
+        seen_tickers = set()
+
+        for tx in self.content.get("transactions", []):
+            ticker = tx.get("ticker")
+            if not ticker or ticker in seen_tickers:
+                continue
+            
+            seen_tickers.add(ticker)
+            stock_info = await self._fetch_stock_info(ticker)
+            
+            if stock_info:
+                stock_data.append(stock_info)
+
+        return stock_data if stock_data else None
 
     async def process_row(self) -> Optional[list[Dict[str, Any]]]:
         """Process all valid transactions and return a list of dicts for PostgreSQL insertion."""
@@ -132,6 +154,204 @@ class ProcessFinancials:
         return None
 
     # ── yfinance fetch helpers (blocking → thread pool) ───────────────────────
+
+    def _fetch_ticker_info(self, ticker: str) -> Dict[str, Any]:
+        """Synchronous yfinance info fetch — called via asyncio.to_thread."""
+        try:
+            stock = yf.Ticker(ticker)
+            return stock.info
+        except Exception as e:
+            print(f"[ERROR] Failed to fetch info for {ticker}: {e}")
+            return {}
+
+    async def _fetch_stock_info(self, ticker: str) -> Optional[Dict[str, Any]]:
+        """
+        Fetch comprehensive stock information from YFinance.
+        Maps to oden.stock table schema (excluding embeddings).
+        """
+        if ticker in self._stock_info_cache:
+            return self._stock_info_cache[ticker]
+
+        try:
+            info = await asyncio.to_thread(self._fetch_ticker_info, ticker)
+            
+            if not info:
+                return None
+
+            # Helper to safely get values with defaults
+            def safe_get(key: str, default: Any = None) -> Any:
+                val = info.get(key, default)
+                return val if val not in [None, 'None', '', float('inf'), float('-inf')] else default
+
+            # Parse IPO date
+            ipo_date = None
+            first_trade_date = safe_get('firstTradeDateEpochUtc')
+            if first_trade_date:
+                try:
+                    ipo_date = datetime.fromtimestamp(first_trade_date).date()
+                except:
+                    pass
+
+            # Parse headquarters location
+            city = safe_get('city', '')
+            state = safe_get('state', '')
+            headquarters = f"{city}, {state}" if city and state else city or state or None
+
+            # Determine business type
+            quote_type = safe_get('quoteType', '')
+            business_type = None
+            if quote_type == 'EQUITY':
+                business_type = 'Corporation'
+            elif quote_type == 'ETF':
+                business_type = 'ETF'
+            elif 'REIT' in safe_get('longBusinessSummary', '').upper():
+                business_type = 'REIT'
+
+            # Extract primary business activities from description
+            description = safe_get('longBusinessSummary') or safe_get('shortBusinessSummary')
+            primary_activities = self._extract_business_activities(description, safe_get('sector'), safe_get('industry'))
+
+            stock_data = {
+                "id": uuid.uuid4(),
+                "ticker": ticker.upper(),
+                
+                # Basic Company Information
+                "company_name": safe_get('shortName') or safe_get('longName'),
+                "legal_name": safe_get('longName'),
+                "description": description,
+                "website": safe_get('website'),
+                
+                # Classification & Sector Information
+                "sector": safe_get('sector'),
+                "industry": safe_get('industry'),
+                "industry_key": safe_get('industryKey'),
+                "business_type": business_type,
+                
+                # Regulatory & Government Alignment Fields
+                "primary_business_activities": primary_activities,
+                "regulatory_domain": self._determine_regulatory_domain(safe_get('sector'), safe_get('industry')),
+                "government_contractor": None,  # Would need additional data source
+                "lobbying_entity": None,  # Would need additional data source
+                "regulatory_exposure": self._determine_regulatory_exposure(safe_get('sector'), safe_get('industry')),
+                
+                # Geographic & Operations
+                "headquarters_location": headquarters,
+                "country": safe_get('country', 'USA'),
+                "state": safe_get('state'),
+                
+                # Market Information
+                "market_cap": safe_get('marketCap'),
+                "enterprise_value": safe_get('enterpriseValue'),
+                "pe_ratio": safe_get('trailingPE') or safe_get('forwardPE'),
+                "pb_ratio": safe_get('priceToBook'),
+                "dividend_yield": safe_get('dividendYield'),
+                
+                # Financial Metrics
+                "total_revenue": safe_get('totalRevenue'),
+                "net_income": safe_get('netIncomeToCommon'),
+                "total_assets": safe_get('totalAssets'),
+                "total_debt": safe_get('totalDebt'),
+                "employees": safe_get('fullTimeEmployees'),
+                
+                # Trading Information
+                "exchange": safe_get('exchange'),
+                "currency": safe_get('currency', 'USD'),
+                "is_active": True,  # Assuming active if we can fetch data
+                "ipo_date": ipo_date,
+                
+                # Metadata
+                "data_source": "YFinance",
+                "last_updated": datetime.now(),
+                "created_at": datetime.now(),
+                
+                # Embeddings will be added separately
+                "description_embedding": None,
+                "activities_embedding": None,
+            }
+
+            self._stock_info_cache[ticker] = stock_data
+            return stock_data
+
+        except Exception as e:
+            print(f"[ERROR] Failed to process stock info for {ticker}: {e}")
+            return None
+
+    def _extract_business_activities(self, description: Optional[str], sector: Optional[str], industry: Optional[str]) -> List[str]:
+        """Extract key business activities for committee matching."""
+        activities = []
+        
+        if sector:
+            activities.append(sector)
+        if industry:
+            activities.append(industry)
+            
+        # Add common keywords from description
+        if description:
+            keywords = [
+                'software', 'hardware', 'pharmaceutical', 'biotechnology', 'medical',
+                'finance', 'banking', 'insurance', 'energy', 'oil', 'gas', 'renewable',
+                'defense', 'aerospace', 'telecommunications', 'retail', 'consumer',
+                'manufacturing', 'technology', 'healthcare', 'real estate'
+            ]
+            desc_lower = description.lower()
+            for keyword in keywords:
+                if keyword in desc_lower and keyword not in [a.lower() for a in activities]:
+                    activities.append(keyword.title())
+        
+        return activities[:10]  # Limit to 10 activities
+
+    def _determine_regulatory_domain(self, sector: Optional[str], industry: Optional[str]) -> Optional[str]:
+        """Determine primary regulatory domain based on sector and industry."""
+        if not sector:
+            return None
+            
+        sector_lower = sector.lower()
+        industry_lower = (industry or '').lower()
+        
+        # Map sectors/industries to regulatory domains
+        if 'financ' in sector_lower or 'bank' in industry_lower:
+            return 'Finance'
+        elif 'health' in sector_lower or 'pharmaceut' in industry_lower or 'biotech' in industry_lower:
+            return 'Healthcare'
+        elif 'energy' in sector_lower or 'oil' in industry_lower or 'gas' in industry_lower:
+            return 'Energy'
+        elif 'defense' in industry_lower or 'aerospace' in industry_lower:
+            return 'Defense'
+        elif 'telecom' in sector_lower:
+            return 'Telecommunications'
+        elif 'technology' in sector_lower:
+            return 'Technology'
+        elif 'real estate' in sector_lower:
+            return 'Real Estate'
+        elif 'consumer' in sector_lower:
+            return 'Consumer Affairs'
+        else:
+            return sector  # Default to sector name
+
+    def _determine_regulatory_exposure(self, sector: Optional[str], industry: Optional[str]) -> Optional[str]:
+        """Generate description of regulatory dependencies."""
+        if not sector:
+            return None
+            
+        sector_lower = sector.lower()
+        industry_lower = (industry or '').lower()
+        
+        exposures = []
+        
+        if 'financ' in sector_lower or 'bank' in industry_lower:
+            exposures.append("SEC regulations, Federal Reserve oversight, banking regulations")
+        if 'health' in sector_lower or 'pharmaceut' in industry_lower:
+            exposures.append("FDA approval processes, healthcare regulations, Medicare/Medicaid policies")
+        if 'energy' in sector_lower:
+            exposures.append("EPA regulations, energy policies, environmental standards")
+        if 'defense' in industry_lower:
+            exposures.append("Defense contracts, export controls, federal procurement regulations")
+        if 'telecom' in sector_lower:
+            exposures.append("FCC regulations, telecommunications policies")
+        if 'technology' in sector_lower:
+            exposures.append("Data privacy laws, antitrust scrutiny, technology export controls")
+            
+        return "; ".join(exposures) if exposures else None
 
     def _fetch_ticker_history(self, ticker: str, start_date: date) -> pd.DataFrame:
         """Synchronous yfinance fetch — called via asyncio.to_thread."""

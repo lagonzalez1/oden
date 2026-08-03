@@ -46,15 +46,6 @@ class Member:
     role: Optional[str] = None        # "Chair" | "Ranking Member" | None
 
 
-@dataclass
-class Subcommittee:
-    name: str
-    url: Optional[str] = None                 # link to subcommittee's own Wikipedia page, if present
-    chair: Optional[str] = None
-    chair_state_party: Optional[str] = None   # e.g. "R-SD"
-    ranking_member: Optional[str] = None
-    ranking_member_state_party: Optional[str] = None
-    members: List[Member] = field(default_factory=list)
 
 
 @dataclass
@@ -64,6 +55,17 @@ class CommitteeProfile:
     jurisdiction: str = ""
     rules: str = ""
 
+
+@dataclass
+class Subcommittee:
+    name: str
+    url: Optional[str] = None                 # link to subcommittee's own Wikipedia page, if present
+    chair: Optional[str] = None
+    chair_state_party: Optional[str] = None   # e.g. "R-SD"
+    ranking_member: Optional[str] = None
+    ranking_member_state_party: Optional[str] = None
+    members: List[Member] = field(default_factory=list)
+    profile: CommitteeProfile = field(default_factory=CommitteeProfile)
 
 @dataclass
 class Committee:
@@ -108,6 +110,11 @@ class Committee:
                         {"name": m.name, "state": m.state, "party": m.party, "role": m.role}
                         for m in sc.members
                     ],
+                    "profile": {
+                        "role": sc.profile.role,
+                        "jurisdiction": sc.profile.jurisdiction,
+                        "rules": sc.profile.rules,
+                    }
                 }
                 for sc in self.subcommittees
             ],
@@ -247,6 +254,7 @@ class HouseCommitteeParser:
 
             chair_name, chair_sp = self._split_name_party(chair_raw)
             ranking_name, ranking_sp = self._split_name_party(ranking_raw)
+            profile = self._extract_profile(self._fetch(sub_url)) if sub_url else CommitteeProfile()
 
             subcommittees.append(
                 Subcommittee(
@@ -256,6 +264,7 @@ class HouseCommitteeParser:
                     chair_state_party=chair_sp,
                     ranking_member=ranking_name,
                     ranking_member_state_party=ranking_sp,
+                    profile=profile
                 )
             )
 
@@ -542,6 +551,7 @@ class HouseCommitteeParser:
 
             committee = Committee(name=name, url=url, congress_number=self.congress_number)
             committee.subcommittees = self._parse_subcommittee_rows(raw["subcommittee_rows"])
+            
 
             if not url:
                 committees.append(committee)

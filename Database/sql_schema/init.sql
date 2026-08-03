@@ -111,7 +111,11 @@ CREATE TABLE IF NOT EXISTS oden.committee (
     congress_num SMALLINT, -- e.g., 119
     chamber VARCHAR(50), -- house, senate, joint
     committee_type VARCHAR(50), -- standing, select, special, joint
+    senate_committee_id VARCHAR(10) DEFAULT NULL,
+    house_committee_id VARCHAR(10) DEFAULT NULL,
     title VARCHAR(255) NOT NULL,
+    jurisdiction_source TEXT,
+    youtube_id TEXT,
     url VARCHAR(255),
     office VARCHAR(100),
     is_subcommittee BOOLEAN DEFAULT FALSE,
@@ -119,10 +123,6 @@ CREATE TABLE IF NOT EXISTS oden.committee (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-ALTER TABLE oden.committee ADD COLUMN IF NOT EXISTS jurisdiction TEXT;
-ALTER TABLE oden.committee ADD COLUMN IF NOT EXISTS roles TEXT;
-ALTER TABLE oden.committee ADD COLUMN IF NOT EXISTS actions TEXT;
-ALTER TABLE oden.committee ADD COLUMN IF NOT EXISTS rules TEXT;
 
 
 CREATE TABLE IF NOT EXISTS oden.legislator (
@@ -131,12 +131,16 @@ CREATE TABLE IF NOT EXISTS oden.legislator (
     prefix VARCHAR(50),
     first_name VARCHAR(100) NOT NULL,
     last_name VARCHAR(100) NOT NULL,
+    official_full VARCHAR(100),
     party VARCHAR(50), -- Democrat, Republican, Independent
     state CHAR(2), -- e.g., 'NY', 'TX'
     district VARCHAR(10), -- '00' for At-Large, or '01', '02', etc.
     chamber VARCHAR(20), -- House or Senate
     leadership_role VARCHAR(250), -- e.g., 'Speaker', 'Majority Leader'
+    gender VARCHAR(5),
+    thomas VARCHAR(10),
     twitter_handle VARCHAR(100),
+    terms jsonb,
     official_url VARCHAR(255),
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -158,3 +162,92 @@ CREATE TABLE IF NOT EXISTS oden.committee_membership (
     -- Ensure a legislator isn't added to the same committee twice in one session
     UNIQUE(legislator_id, committee_id)
 );
+
+
+-- Create a dedicated chunking table
+CREATE TABLE IF NOT EXISTS oden.committee_chunks (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    committee_id UUID REFERENCES oden.committee(id) ON DELETE CASCADE,
+    content_type VARCHAR(50) NOT NULL, -- 'jurisdiction', 'roles', 'actions', 'rules'
+    chunk_index INT NOT NULL, -- To keep order of paragraphs
+    chunk_text TEXT NOT NULL, -- The actual text content (~200-500 words)
+    embedding VECTOR(1536), -- Matches text-embedding-3-small
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Index for blazing fast hybrid/vector searches
+CREATE INDEX IF NOT EXISTS committee_chunks_vector_idx 
+ON oden.committee_chunks USING hnsw (embedding vector_cosine_ops);
+
+
+-- ========================================
+-- STOCK DATA FOR COMMITTEE ALIGNMENT
+-- ========================================
+
+-- Main stock/ticker table
+CREATE TABLE IF NOT EXISTS oden.stock (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ticker VARCHAR(10) UNIQUE NOT NULL, -- e.g., 'AAPL', 'MSFT'
+    
+    -- Basic Company Information
+    company_name VARCHAR(255) NOT NULL,
+    legal_name VARCHAR(255), -- Full legal company name
+    description TEXT, -- Business description from YFinance
+    website VARCHAR(255),
+    
+    -- Classification & Sector Information
+    sector VARCHAR(100), -- e.g., 'Technology', 'Healthcare'
+    industry VARCHAR(100), -- e.g., 'Software', 'Biotechnology'
+    industry_key VARCHAR(100), -- YFinance industry classification
+    business_type VARCHAR(100), -- e.g., 'Corporation', 'REIT', 'MLP'
+    
+    -- Regulatory & Government Alignment Fields
+    primary_business_activities TEXT[], -- Array of key business activities for committee matching
+    regulatory_domain VARCHAR(100), -- e.g., 'Finance', 'Healthcare', 'Energy', 'Defense'
+    government_contractor BOOLEAN DEFAULT FALSE, -- Has government contracts
+    lobbying_entity BOOLEAN DEFAULT FALSE, -- Registered lobbying activities
+    regulatory_exposure TEXT, -- Description of regulatory dependencies
+    
+    -- Geographic & Operations
+    headquarters_location VARCHAR(100), -- e.g., 'Cupertino, CA'
+    country VARCHAR(50) DEFAULT 'USA',
+    state VARCHAR(2), -- State of incorporation/headquarters
+    
+    -- Market Information
+    market_cap NUMERIC(20, 2), -- Market capitalization
+    enterprise_value NUMERIC(20, 2),
+    pe_ratio NUMERIC(10, 2),
+    pb_ratio NUMERIC(10, 2),
+    dividend_yield NUMERIC(6, 4),
+    
+    -- Financial Metrics (for context)
+    total_revenue NUMERIC(20, 2),
+    net_income NUMERIC(20, 2),
+    total_assets NUMERIC(20, 2),
+    total_debt NUMERIC(20, 2),
+    employees INTEGER,
+    
+    -- Trading Information
+    exchange VARCHAR(20), -- e.g., 'NASDAQ', 'NYSE'
+    currency VARCHAR(3) DEFAULT 'USD',
+    is_active BOOLEAN DEFAULT TRUE, -- Actively trading
+    ipo_date DATE,
+    
+    -- Metadata & Enrichment
+    data_source VARCHAR(50) DEFAULT 'YFinance', -- Source of data
+    last_updated TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    
+    -- Embeddings for similarity search
+    description_embedding VECTOR(1536), -- Embedding of business description
+    activities_embedding VECTOR(1536), -- Embedding of business activities
+    
+    CONSTRAINT valid_market_cap CHECK (market_cap >= 0)
+);
+
+-- Indexes for stock lookups
+CREATE INDEX IF NOT EXISTS idx_stock_sector ON oden.stock(sector);
+CREATE INDEX IF NOT EXISTS idx_stock_industry ON oden.stock(industry);
+CREATE INDEX IF NOT EXISTS idx_stock_regulatory_domain ON oden.stock(regulatory_domain);
+CREATE INDEX IF NOT EXISTS idx_stock_ticker ON oden.stock(ticker);
+

@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Optional, List
+from typing import Any, Optional, List, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, field_validator
@@ -14,11 +14,30 @@ class AppBaseModel(BaseModel):
     )
 
 
+# Committee schemas ─────────────────────────────────────────────────────────────'
+
+
+class CommitteeBase(AppBaseModel):
+    """Fields shared across create / update / read."""
+    pass
+
+
+class CommitteeEmbeddings(CommitteeBase):
+    """Payload accepted when creating a record."""
+    congress: str
+    chamber: Literal["house", "senate", "joint"]
+
+
+class CreateCommitteeRequest(AppBaseModel):
+    congress_num: int
+
+
 # Document schemas ─────────────────────────────────────────────────────
 
 
 class IngestRequest(BaseModel):
     year: Optional[str] = None
+    count: Optional[int] = None
 
 
 class MonitorChangesRequest(BaseModel):

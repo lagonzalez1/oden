@@ -11,4 +11,7 @@ class EmbeddingService:
         response = await asyncio.to_thread(
             self.client.embeddings, model=self.model, prompt=text
         )
-        return response["embedding"]
+        embedding = response["embedding"]
+        if len(embedding) == 768:
+            embedding = embedding + [0.0] * 768
+        return embedding

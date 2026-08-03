@@ -25,8 +25,9 @@ async def lifespan(app: FastAPI):
     # Declare the queues to use
     await rabbitmq_client.declare_queue("worker-1", durable=True)
     await rabbitmq_client.declare_queue("worker-2", durable=True)
+    await rabbitmq_client.declare_queue("emailer_service", durable=True)
     print("✓ All services connected: PostgreSQL, Neo4j, RabbitMQ")
-    print(f"  - RabbitMQ queues declared: worker-1, worker-2")
+    print(f"  - RabbitMQ queues declared: worker-1, worker-2, emailer_service")
     yield 
     await postgres_db.disconnect()
     await neo4j_db.disconnect()

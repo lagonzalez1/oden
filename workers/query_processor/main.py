@@ -77,7 +77,7 @@ async def process_text_llm(text: Optional[str])->Optional[Dict]:
             "natural_language_query": text,
         },
         max_tokens=80000,
-        temperature=0.2,
+        temperature=0.3,
     )
     
     prompt_data = builder.build(prompt_config)
@@ -117,10 +117,12 @@ async def process_document_task(body, message: aio_pika.IncomingMessage, postgre
             doc = json.loads(body)
 
         question, _id = doc.get("question"), doc.get("id")
+        print(f"Question: {question}, _id: {_id}")
         if question:
             content = await extract_llm_content_with_fallback(text_content=question)
             if content:
-                data = {'response': content.get("cypher"), 'params': json.dumps(content.get("params")), 'updated_at': datetime.now()}
+                data = {'response': content.get("cypher"), 
+                'params': json.dumps(content.get("params")), 'updated_at': datetime.now(), "status": "completed"}
                 await document_service.update_query_request(_id, data)
                 return True
             else:
@@ -128,6 +130,8 @@ async def process_document_task(body, message: aio_pika.IncomingMessage, postgre
 
         return False
     except Exception as e:
+        data = {'response': None, 'params': None, 'updated_at': datetime.now(), "status": "failed"}
+        await document_service.update_query_request(_id, data)
         logger.error(f"Failed to process document: {e}")
         return False
 

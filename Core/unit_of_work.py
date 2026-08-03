@@ -1,7 +1,9 @@
 from abc import ABC, abstractmethod
 from typing import TypeVar, Generic
-from Repository.documents_repository import AbstractRepository, CommitteeRepository
-
+from Repository.documents_repository import AbstractRepository
+from Repository.committee_repository import CommitteeRepository
+from Repository.commitee_chunk_repository import CommitteeChunkRepository
+from Repository.legislator_repository import LegislatorRepository
 
 # Assuming T is your Document model type
 T = TypeVar("T")
@@ -9,11 +11,12 @@ T = TypeVar("T")
 class AbstractUnitOfWork(ABC):
     # This acts as a contract. Every UoW must have this.
     documents: AbstractRepository
-    stocks: AbstractRepository
+    stock: AbstractRepository
     queries: AbstractRepository
     committee: AbstractRepository
-    legislator: AbstractRepository
+    legislator: LegislatorRepository
     committee_membership: CommitteeRepository
+    committee_chunks: CommitteeChunkRepository
 
     async def __aenter__(self) -> "AbstractUnitOfWork":
         return self

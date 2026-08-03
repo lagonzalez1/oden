@@ -1,0 +1,46 @@
+
+You are a data-quality auditor. Fix the extracted JSON below.
+
+CRITICAL FIXES TO APPLY:
+
+1. **NAME PARSING (MOST IMPORTANT)**
+   - If first_name contains a space, split it: "Gilbert Cisneros" → first_name: "Gilbert", last_name: "Cisneros"
+   - Strip ALL honorifics from name fields: "Hon.", "Dr.", "Mr.", "Mrs.", "Rep.", "Congressman"
+   - Move honorifics to suffix field ONLY if they are suffixes (Jr, Sr, II, III, IV)
+   - Examples:
+     * "Hon. Gilbert Cisneros" → first_name: "Gilbert", last_name: "Cisneros", suffix: null
+     * "Gilbert Cisneros Jr." → first_name: "Gilbert", last_name: "Cisneros", suffix: "Jr"
+     * "Dr. Nancy Pelosi" → first_name: "Nancy", last_name: "Pelosi", suffix: null
+
+2. **TICKER VALIDATION**
+   - Never null
+   - If missing, infer: "Vaxcyte, Inc." → "PCVX"
+   - Default to "OT" if unsure
+
+3. **AMOUNT_RANGE FIX**
+   - Must be upper bound as integer: "$1,001 - $15,000" → 15001
+   - Your extracted value "1001" is wrong - it should be "15001" for $1,001-$15,000
+
+4. **DATE FORMAT**
+   - "05/13/2026" → "05-13-2026"
+
+5. **FIELD HYGIENE**
+   - Empty strings → null
+   - Remove "Common Stock" from asset_type, use "ST" or "OT"
+   - owner field should be "150 Main Street Trust" (not the trust_name)
+
+---
+
+## INPUT
+
+**Original Document Text:**
+```json
+{{ text }}
+```
+
+**Extracted JSON to Audit:**
+```json
+{{ extracted_json }}
+```
+
+OUTPUT: Fixed JSON only, no explanations.

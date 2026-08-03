@@ -7,6 +7,7 @@ class Neo4jDatabase:
     def __init__(self):
         self._driver: AsyncDriver | None = None
 
+
     async def connect(self) -> None:
         self._driver = AsyncGraphDatabase.driver(
             settings.NEO4J_URI,

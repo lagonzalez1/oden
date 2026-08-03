@@ -35,6 +35,21 @@ class DocumentsService:
     # ── Read ──────────────────────────────────────────────────────────────────
 
 
+    async def get_document_by_id(self, doc_id: str) -> bool:
+        """
+            Get a document by its ID.
+            Returns True if the document has been parsed, False otherwise.
+            """
+        try:
+            async with self.uow:
+                document = await self.uow.documents.get_by_id(doc_id)
+                await self.uow.commit()
+            if document:
+                return document['doc_id_parsed']
+            return False
+        except Exception as e:
+            logger.error(f"[Document Service] Failed to get document by id: {e}")
+
     # ── Write ─────────────────────────────────────────────────────────────────
 
     async def natural_language_query(self, question: str):
@@ -45,7 +60,7 @@ class DocumentsService:
                 'status': "IN-QUEUE", 
                 'created_at': datetime.now()
             }
-            
+            print(f"Data: {data}")
             # 2. Create the record
             user_query = await self.uow.queries.create(data)
             
@@ -57,9 +72,9 @@ class DocumentsService:
         if user_query:
             # 4. Use the instance directly to get the generated ID
             message_payload = {
-                "id": str(user_query.id),
-                "question": str(user_query.question),
-                "status": str(user_query.status)
+                "id": str(user_query['id']),
+                "question": str(user_query['question']),
+                "status": str(user_query['status'])
             }
             
             await rabbitmq_client.publish(
@@ -73,6 +88,16 @@ class DocumentsService:
             
         return None
 
+    async def get_natural_language_query(self, query_id: str) -> Optional[Dict[str, Any]]:
+        """Fetch a natural_language_queries row by id."""
+        try:
+            async with self.uow:
+                row = await self.uow.queries.get_by_id(query_id)
+                await self.uow.commit()
+                return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"[Document Service] Failed to get NL query {query_id}: {e}")
+            raise e
 
     async def update_query_request(self, id, data):
         try:
@@ -93,12 +118,19 @@ class DocumentsService:
             logger.error(f"[Document Service] Update failed for {id}: {e}")
             raise e
 
-    async def process_document_csv(self, file: Optional[UploadFile] = None, df :Optional[pd.DataFrame] = None) -> int:
+    async def process_document_csv(self, 
+    file: Optional[UploadFile] = None, 
+    df :Optional[pd.DataFrame] = None, 
+    count: Optional[int] = None) -> int:
         """
-        Parses a CSV file and saves rows to the PostgreSQL documents table.
-        Returns the count of successfully processed rows.
+        Parses a CSV file or DataFrame and saves rows to the PostgreSQL documents table,
+        then pushes them to RabbitMQ queue for processing.          
+        Returns:
+            Number of successfully processed rows
         """
         saved_ids = []
+        
+        # Parse input data
         if file is not None:
             content = await file.read()
             csv_reader = csv.DictReader(io.StringIO(content.decode("utf-8")))
@@ -107,13 +139,25 @@ class DocumentsService:
             csv_reader = df.replace({float('nan'): None}).to_dict('records')
         
         rows_added = 0
+        skipped_count = 0
+        
         async with self.uow:
             for row in csv_reader:
+                # Check if we've reached the count limit
+                if count is not None and rows_added >= count:
+                    logger.info(f"Reached document limit: {count}")
+                    break
+                
                 doc_id = row.get("DocID")
+                
+                # Check if document already exists
                 found = await self.uow.documents.get_by_id(str(doc_id))
                 await self.uow.commit()
+                
                 if found:
+                    skipped_count += 1
                     continue
+                
                 year_val = row.get("Year")
                 
                 db_data = {
@@ -132,24 +176,31 @@ class DocumentsService:
                     "doc_size": 0
                 }
                 
+                # Save document ID for queue processing
                 saved_ids.append({
                     'doc_id': str(doc_id) if doc_id is not None else None, 
                     'filing_year': int(year_val) if year_val and str(year_val).isdigit() else None
                 })
                 
+                # Insert into database
                 await self.uow.documents.create(db_data)
-
                 rows_added += 1
+                
+            # Commit all database inserts
             await self.uow.commit()
-        # Process ids by pushing to queue, one-unit-of-work.
-        for i in range(len(saved_ids)-1):
-            item = saved_ids[i]
+        
+        logger.info(f"Inserted {rows_added} documents into database (skipped {skipped_count} duplicates)")
+        
+        # Push all saved documents to RabbitMQ queue
+        queued_count = 0
+        for item in saved_ids:
             message = {
                 "doc_id": item['doc_id'],
                 "filing_year": item['filing_year'],
                 "action": "process_metadata",
                 "timestamp": datetime.now().isoformat()
             }
+            
             await rabbitmq_client.publish(
                 queue_name='worker-1',
                 message=json.dumps(message),
@@ -157,13 +208,42 @@ class DocumentsService:
                 message_type='application/json',
                 expiration=500000
             )
+            queued_count += 1
+        
+        logger.info(f"Queued {queued_count} documents for processing")
+        
         return rows_added
 
-    async def ingest_documents(self, year: Optional[str])->bool:
+    async def ingest_documents(self, year: Optional[str], count: Optional[int]) -> int:
+        """
+        Download and ingest financial disclosure documents for a specific year.
+        
+        Args:
+            year: Filing year (e.g., 2024)
+            count: Maximum number of documents to process and queue (None = all)
+            
+        Returns:
+            Number of documents successfully ingested and queued
+        """
         try:
+            logger.info(f"Starting document ingestion for year {year}, max count: {count or 'unlimited'}")
+            
+            # Download the disclosure reports
             report_df = await self.download_reports(year=year)
-            inserted = await self.process_document_csv(file=None, df=report_df)
-            return inserted
+            
+            if report_df is None or report_df.empty:
+                logger.warning(f"No documents found for year {year}")
+                return 0
+            
+            logger.info(f"Downloaded {len(report_df)} documents for year {year}")
+            
+            # Process and insert documents into database, then queue them
+            inserted_count = await self.process_document_csv(file=None, df=report_df, count=count)
+            
+            logger.info(f"Successfully ingested and queued {inserted_count} documents for year {year}")
+            
+            return inserted_count
+            
         except Exception as e:
             logger.error(f"[Document ingest_documents] Download reports: {e}")
             raise e
@@ -236,136 +316,7 @@ class DocumentsService:
             logger.error(f"[Document Service] Update failed for {record_id}: {e}")
             raise e
     
-    async def create_committee_content(self) -> T | None:
-        """Create the committee with return its id*  """
-        try:
-            cnt = 0
-            # 1. Open the transaction boundary, 
-            async with self.uow:
-               
-               parser = HouseCommitteeParser(congress_number="119")
-               committees = parser.parse_all()
-
-
-
-                
-            return cnt
-        except Exception as e:
-            # The UoW __aexit__ will handle the rollback, 
-            # but we log the error here for the Service context.
-            logger.error(f"[Document Service] Update failed for: {e}")
-            raise e
-
-    async def upsert_legislator_from_wiki(self) -> T | None:
-        """Create a legislator(HOUSE) if not exist (upsert idempodent), then create the linkage from commitee"""
-        try:
-            cnt = 0
-            # 1. Open the transaction boundary, 
-            async with self.uow:
-                wiki = ExtractWikiContent()
-                committee_members = wiki.fetch_all_members()
-                committee_psql = await self.uow.committee.get_table(filters={"chamber": "house"})
-                committee_ = {}
-                for row in committee_psql:
-                    title = " ".join(row["title"].split()).upper()
-                    committee_[title] = dict(row)
-                for row in committee_members:
-                    if len(row) != 4:
-                        continue
-                    committee_map, chair_map, ranking_map, members_map = dict(row[0]), row[1], row[2], dict(row[3])
-                    # 2. Perform the update via the repo attached to the UoW
-                    committee_title = " ".join(committee_map['text'].split()).upper()
-                    for k, v in members_map.items():
-                        party = "Republican" if k == "Majority" else "Democrat"
-                        for name, state in v:
-                            parts = name.split()
-                            first = parts[0].upper()
-                            last = parts[-1].upper()
-                            st = wiki.get_abbriv(state).upper()
-                            bioguide_id = f"H{st}:{first[:3]}:{last}"
-                            data = { "bioguide_id": bioguide_id,"first_name": first, "last_name": last, 
-                                    "party": party, "state": st, "chamber": "house", "is_active": True }
-                            legislator_record = await self.uow.legislator.upsert(data, 'bioguide_id')
-                            await self.uow.committee_membership.merge_membership(str(committee_[committee_title]['id']), str(legislator_record['id']), "Member", None, False, None)
-                            cnt += 1              
-                            await self.uow.commit()
-            return cnt
-        except Exception as e:
-            # The UoW __aexit__ will handle the rollback, 
-            # but we log the error here for the Service context.
-            logger.error(f"[Document Service] Update failed for: {e}")
-            raise e
-        
-    async def create_house_committee(self) -> T | None:
-        """Create a legislator(HOUSE) if not exist (upsert idempodent), then create the linkage from commitee"""
-        try:
-            cnt = 0
-            # 1. Open the transaction boundary, 
-            async with self.uow:
-                wiki = HouseCommitteeParser(congress_number="119")
-                embedding_service = EmbeddingService()
-                committees = wiki.parse_all()
-
-                for i in range(0, len(committees)):
-                    committee = committees[i]
-                    committee_id = wiki.generate_md5_hash(committee.name)
-                    data = { "title": committee.name, "committee_id": committee_id ,"chamber": "house", "jurisdiction": committee.profile.jurisdiction, "roles": committee.profile.role, "rules": committee.profile.rules, "parent_committee_id": None}
-                    embedding_content = f"{committee.name} {committee.profile.jurisdiction} {committee.profile.role} {committee.profile.rules}"
-                    committee_record = await self.uow.committee.upsert(data, 'committee_id')
-                    embedding_vector = await embedding_service.embed(embedding_content)
-                    await self.uow.committee.update_embedding(str(committee_record['id']), embedding_vector)
-                    for member in committee.members:
-                        party = member.party
-                        name_parts = member.name.split()
-                        if len(name_parts) < 2:
-                            continue  # Skip if the name doesn't have at least two parts
-                        first = name_parts[0].upper()
-                        last = name_parts[-1].upper()
-                        st = member.state.upper()
-                        state = wiki._abbrev(st).upper()
-                        bioguide_id = f"H{st}:{first[:3]}:{last}"
-                        data = { "bioguide_id": bioguide_id,"first_name": first, "last_name": last, 
-                                "party": party, "state": state, "chamber": "house", "is_active": True }
-                        legislator_record = await self.uow.legislator.upsert(data, 'bioguide_id')
-                        await self.uow.committee_membership.merge_membership(str(committee_record['id']), str(legislator_record['id']), member.role, None, False, None)
-                        cnt += 1              
-                        await self.uow.commit()
-                    
-                    for subcommittee in committee.subcommittees:
-                        committee_id = wiki.generate_md5_hash(subcommittee.name)
-                        data = { "title": subcommittee.name, "chamber": "house", "committee_id": committee_id, "jurisdiction": subcommittee.profile.jurisdiction, "roles": subcommittee.profile.role, "rules": subcommittee.profile.rules, "parent_committee_id": str(committee_record['id']) }
-                        subcommittee_record = await self.uow.committee.upsert(data, 'committee_id')
-                        embedding_content = f"{committee.name} {committee.profile.jurisdiction} {committee.profile.role} {committee.profile.rules}"
-                        committee_record = await self.uow.committee.upsert(data, 'committee_id')
-                        embedding_vector = await embedding_service.embed(embedding_content)
-                        await self.uow.committee.update_embedding(str(committee_record['id']), embedding_vector)
-                        
-                        await self.uow.committee_membership.merge_membership(str(committee_record['id']), str(subcommittee_record['id']), "Subcommittee", None, False, None)
-                        for member in subcommittee.members:
-                            party = member.party
-                            name_parts = member.name.split()
-                            if len(name_parts) < 2:
-                                continue  # Skip if the name doesn't have at least two parts
-                            first = name_parts[0].upper()
-                            last = name_parts[-1].upper()
-                            st = member.state.upper()
-                            state = wiki._abbrev(st).upper()
-                            bioguide_id = f"H{st}:{first[:3]}:{last}"
-                            data = { "bioguide_id": bioguide_id,"first_name": first, "last_name": last, 
-                                    "party": party, "state": state, "chamber": "house", "is_active": True }
-                            legislator_record = await self.uow.legislator.upsert(data, 'bioguide_id')
-                            await self.uow.committee_membership.merge_membership(str(subcommittee_record['id']), str(legislator_record['id']), member.role, None, False, None)
-                            cnt += 1              
-                            await self.uow.commit()
-                
-                
-            return cnt
-        except Exception as e:
-            # The UoW __aexit__ will handle the rollback, 
-            # but we log the error here for the Service context.
-            logger.error(f"[Document Service] Update failed for: {e}")
-            raise e
-
+    
     async def create_transaction_gains(self, data: List[Dict[str, Any]]) -> int | None:
         """Insert transaction gain rows and return the count of successful inserts."""
         try:

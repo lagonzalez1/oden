@@ -31,6 +31,10 @@ class GraphService(Generic[T]):
         return result
 
 
+    async def search(self, filters: Optional[Dict[str, Any]] = None)->GraphDTO:
+        """ Search the graph for nodes with the given label and filters. """
+        return await self._repo.search(filters=filters or {})
+
     async def get_assets(self)->List[Dict[str, Any]] | None:
         """ Retrive all assets withg their linked"""
         result = await self._repo.get_assets()
@@ -44,10 +48,42 @@ class GraphService(Generic[T]):
         by_bioguide_id_result = await self._repo.get_by_bioguide_id(bioguide_id=id)
         return by_bioguide_id_result
 
-    async def search(self, first_name: str = None, last_name: str = None):
-        body = { "first_name": first_name, "last_name": last_name }
-        filer = await self._repo.search(body)
-        return filer
+    async def get_node_neighborhood(
+        self,
+        node_id: str,
+        depth: int = 2,
+        rel_types: Optional[List[str]] = None,
+    ) -> GraphDTO | None:
+        """
+        Return a Member-centered subgraph (committees, transactions, assets).
+        """
+        return await self._repo.get_node_neighborhood(
+            node_id=node_id,
+            depth=depth,
+            rel_types=rel_types,
+        )
+
+    async def run_cypher_to_graph(
+        self,
+        cypher: str,
+        params: Optional[Dict[str, Any]] = None,
+    ) -> GraphDTO:
+        """Execute a stored/generated Cypher query and return GraphDTO."""
+        return await self._repo.run_cypher_to_graph(cypher=cypher, params=params)
+
+    
+    async def get_node_by_label(
+        self,
+        label: str,
+        filters: Optional[Dict[str, Any]] = None,
+    ):
+        """
+        Lookup nodes by label + frontend filter params.
+        Repo implementation is responsible for Cypher; this layer only forwards.
+        """
+
+        return await self._repo.search(filters=filters or {})
+
 
     # ── Write ─────────────────────────────────────────────────────────────────
 

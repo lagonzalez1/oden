@@ -38,5 +38,16 @@ class Settings(BaseSettings):
     RABBITMQ_VHOST: str = os.getenv("RABBITMQ_VHOST")
     RABBITMQ_HEARTBEAT: int = os.getenv("RABBITMQ_HEARTBEAT")
 
+    # Congress API
+    CONGRESS_API_KEY: str = os.getenv("CONGRESS_API_KEY")
+
+
+    # SMTP
+    SMTP_HOST: str = os.getenv("SMTP_HOST")
+    SMTP_PORT: int = os.getenv("SMTP_PORT")
+    SMTP_USERNAME: str = os.getenv("SMTP_USERNAME")
+    SMTP_PASSWORD: str = os.getenv("SMTP_PASSWORD")
+    FROM_EMAIL: str = os.getenv("FROM_EMAIL")
+
 
 settings = Settings()

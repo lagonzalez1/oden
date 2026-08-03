@@ -26,3 +26,4 @@ pandas
 lxml
 yfinance
 beautifulsoup4
+neontology

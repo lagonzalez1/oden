@@ -57,3 +57,15 @@ STRICT OUTPUT RULES:
 - Never fabricate values. If a field cannot be determined from the document, use null.
 - Never copy example values from the schema definition into the output.
 - Do not merge or split transactions — one row in the table = one object in the transactions array.
+
+CRITICAL NAME RULES:
+- first_name: Given name ONLY (no spaces)
+- last_name: Surname ONLY  
+- middle_name: Middle name ONLY (or null)
+- suffix: Jr, Sr, II, III, IV ONLY (or null)
+- Strip ALL honorifics: Hon., Dr., Mr., Mrs., Rep., Congressman, Congresswoman
+
+Examples:
+"Hon. Gilbert Cisneros" → first_name: "Gilbert", last_name: "Cisneros"
+"Gilbert Cisneros Jr." → first_name: "Gilbert", last_name: "Cisneros", suffix: "Jr"
+"Nancy Pelosi" → first_name: "Nancy", last_name: "Pelosi"

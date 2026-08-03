@@ -2,48 +2,42 @@ import io
 import asyncio
 import logging
 import json
-import time
-import re
 from datetime import datetime
-import random
 from typing import Dict, Optional, Any, List
 from MessageBroker.rabbitmq_client import RabbitMQConfig, rabbitmq_client
 from Config.settings import settings
 import aio_pika
-from Prompts.Builder import PromptBuilder, PromptConfig
-from LLM.DocumentValidator import FilingExtraction
-from LLM.LocalModel import LocalModel
-from LLM.LamaModel import LamaModel
-from LLM.VisonModel import VisionModel
 from Core.dependencies import PostgresDep, Neo4jDep
 from Repository.documents_repository import DocumentRepository
 from Repository.graph_repository import TransactionRepository
 from Core.SqlAlchemyUnitOfWork import SqlAlchemyUnitOfWork
-from functools import wraps
 from Service.commitee_service import CommitteeService
 from Service.document_service import DocumentsService
+from Service.member_service import MemberService
+from Service.stock_service import StockService
 from Service.graph_service import GraphService as GraphService
 from Downloads.DownloadFile import DownloadFile 
-from YFinance.ProcessFinancials import ProcessFinancials
+from Transaction.ProcessTransaction import ProcessTransaction
+from Agents.AgentProcessor import AgentProcessor
 from Database.postgres import postgres_db
 from Database.neo4j_ import neo4j_db
-import io
 import uuid
-from PIL import Image
-import base64
 
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Assuming the class you provided is in a file named rabbit_client.py
-# from rabbit_client import rabbitmq_client, RabbitMQConfig
-builder = PromptBuilder()
+agent_processor = AgentProcessor()
 
 
 def _postgres_service_committee(session: Any)->CommitteeService:
     uow = SqlAlchemyUnitOfWork(session)
     return CommitteeService(uow)
+
+
+def _postgres_service_stocks(session: Any)->StockService:
+    uow = SqlAlchemyUnitOfWork(session)
+    return StockService(uow)
 
 def _postgres_service(session: Any)->DocumentsService:
     uow = SqlAlchemyUnitOfWork(session)
@@ -53,96 +47,9 @@ def _neo4j_service(session: Any) -> GraphService:
     neo4j_repository = TransactionRepository(session)
     return GraphService(neo4j_repository)
 
-def retry(max_retries=3, base_delay=1, exponential_base=2):
-    """ Retry decorator with exponential backoff """
-    def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            last_exception = None
-            for attempt in range(max_retries):
-                try:
-                    return func(*args, **kwargs)
-                except Exception as e:
-                    last_exception = e
-                    logger.warning(f"Attempt {attempt + 1}/{max_retries} failed: {e}")
-                    if attempt < max_retries - 1:
-                        # Calculate delay with exponential backoff + jitter
-                        delay = base_delay * (exponential_base ** attempt) + random.uniform(0, 1)
-                        logger.info(f"Retrying in {delay:.2f} seconds...")
-                        time.sleep(delay)
-            
-            logger.error(f"All {max_retries} attempts failed")
-            raise last_exception
-        return wrapper
-    return decorator
-
-
-async def process_text_llm(text: Optional[str])->Optional[Dict]:
-    """Extract LLM content with retry on validation errors"""
-    prompt_config = PromptConfig(
-        template_name="reader_identity",
-        system_template_name="system",
-        system_variables={
-            "dummy_key": None,
-        },
-        model="qwen3.5",
-        variables={
-            "text": text,
-        },
-        max_tokens=80000,
-        temperature=0.1,
-    )
-    
-    prompt_data = builder.build(prompt_config)
-    model = LocalModel(FilingExtraction, prompt_data)
-    response = model._invoke_model()
-    # Add validation check here if needed
-    if not response or not isinstance(response, dict):
-        raise ValueError(f"Invalid response from secondary model : {response}")
-    return response
-
-
-async def process_text_vision(image: bytes)->Optional[Dict]:
-    """Extract LLM content with retry on validation errors"""
-    image_b64 = base64.b64encode(image).decode("utf-8")
-    prompt_config = PromptConfig(
-        template_name="reader_identity",
-        system_template_name="system",
-        system_variables={
-            "dummy_key": None,
-        },
-        model="llama3.2-vision",
-        variables={
-            "text": "",
-        },
-        images=[image_b64],
-        max_tokens=80000,
-        temperature=0.1,
-    )
-    
-    prompt_data = builder.build(prompt_config)
-    model = VisionModel(FilingExtraction, prompt_data)
-    response = model._invoke_model()
-    # Add validation check here if needed
-    if not response or not isinstance(response, dict):
-        raise ValueError(f"Invalid response from secondary model : {response}")
-    return response
-
-    
-@retry(max_retries=3, base_delay=2)
-async def extract_llm_content_with_fallback(content: bytes, text_content: str) -> Optional[dict]:
-    """ Try the text model first """
-    try:
-        if not text_content:
-            return None
-        response = await process_text_llm(text_content)
-        if response and isinstance(response, dict):
-            return response
-        return None
-    except Exception as e:
-        logger.warning(f"Local model failed: {e}")
-    except Exception as e:
-        logger.warning(f"Fallback model failed: {e}")
+def _postgres_service_member(session: Any)->MemberService:
+    uow = SqlAlchemyUnitOfWork(session)
+    return MemberService(uow)
 
 
 async def process_document_task(body, message: aio_pika.IncomingMessage, postgres_session, neo4j_session) -> bool:
@@ -150,6 +57,18 @@ async def process_document_task(body, message: aio_pika.IncomingMessage, postgre
     document_service = _postgres_service(postgres_session)
     neo4j_service = _neo4j_service(neo4j_session)
     committee_service = _postgres_service_committee(postgres_session)
+    stock_service = _postgres_service_stocks(postgres_session)
+    member_service = _postgres_service_member(postgres_session)
+    
+    # Initialize transaction processor
+    transaction_processor = ProcessTransaction(
+        document_service=document_service,
+        neo4j_service=neo4j_service,
+        committee_service=committee_service,
+        stock_service=stock_service,
+        member_service=member_service
+    )
+    
     try:
         if isinstance(body, dict):
             doc = body
@@ -159,66 +78,46 @@ async def process_document_task(body, message: aio_pika.IncomingMessage, postgre
         doc_id = doc.get("doc_id")
         downloader = DownloadFile(body)
         pdf_content = await downloader.get_pdf()
+        
         if pdf_content is None:
-            await failed_extraction(doc_id, document_service)
-            logger.warning(f"[!] File {doc_id} returned status")
+            await transaction_processor.mark_extraction_failed(doc_id)
+            logger.warning(f"[!] File {doc_id} returned no content")
             return True
+            
         if pdf_content:
             text = downloader.get_text()
             if text:
-                content = await extract_llm_content_with_fallback(content=None, text_content=text)
+                content = await agent_processor.run(text)
                 if content:
                     row = content.get("transactions", [])
                     first_name, last_name, state_district = content.get("first_name"), content.get("last_name"), content.get("state_district")
-                    print("CHAGNES")
-                    bioguide_id = f"H{state_district[:2].upper()}:{first_name[:3].upper()}:{last_name.upper()}"
                     txs = [{**trades, "id": str(uuid.uuid4())} for trades in row]
                     content['transactions'] = txs
-                    content['bioguide_id'] = bioguide_id
-                    await successfull_extraction_save(doc_id, content, len(text), document_service, neo4j_service, committee_service)
+                
+                    await transaction_processor.process_and_save(doc_id, content, len(text))
                     return True
 
-        await failed_extraction(doc_id, document_service)
-        return True 
+        await transaction_processor.mark_extraction_failed(doc_id)
+        return True
+        
     except Exception as e:
         logger.error(f"Failed to process document: {e}")
         return False
 
+"""
+[ Company Profile ] 
+       │
+       ▼
+ [ Large Language Model ] ──► Extract key industries, keywords, & compliance tags
+       │
+       ▼
+ [ Hybrid Postgres Query ] ──► Search vector embeddings + Match explicit text keywords
+       │
+       ▼
+ [ Ranked Final Results ] ──► Cross-reference against known regulatory frameworks
 
-async def transactions_parsed(content: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
-    """Process a filing and calculate financial performance."""
-    processor = ProcessFinancials(content)
-    return await processor.process_row()
+"""
 
-async def successfull_extraction_save(doc_id: str, content: Dict[str, Any], doc_size: Optional[int], document_service, neo4j_service, committee_service):
-    try:
-        update = { 'doc_id_parsed': True, 'processed_status': "SUCCESS", 
-                "last_updated_date": datetime.now(), "last_updated_date": datetime.now(), 'doc_size': doc_size}
-        logger.info(f"[successfull_extraction_save] content: {content}")
-        tx = await transactions_parsed(content)
-
-        logger.info(f"[transactions_parsed] response {tx}")
-        if tx is not None:
-            await document_service.create_transaction_gains(data=tx)
-
-        await document_service.update_extractions(doc_id, update)
-        ## Find in db return the legislator id ? push into graph 
-        await neo4j_service.ingest_filing(content)
-        
-    except Exception as e:
-        logger.error(f"Failed ingest data: {e}")
-        return False
-
-async def failed_extraction(doc_id: str, document_service):
-    update = { 'doc_id_parsed': False, 'processed_status': "FAILED", 
-            "last_updated_date": datetime.now(), "last_updated_date": datetime.now()}
-    await document_service.update_extractions(doc_id, update)
-
-## The issue is this page hands when rabbitmq gets disconnected from this worker.
-## This causes a worker to go stale
-## Possible sol: Existing Person,Member,Committee. 
-# Possilbe sol: clear db
-# possible sol: increate rabbitmq exp time >  
 
 async def main():
     await postgres_db.connect()

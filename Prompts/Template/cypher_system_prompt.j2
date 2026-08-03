@@ -4,11 +4,29 @@ ONLY valid, executable Cypher queries — no explanation, no markdown, no preamb
 
 {# ── Node Definitions ─────────────────────────────────────── #}
 NODES:
-  (:Person)
-      name             : string  — full filer name e.g. "Hon. Nancy Pelosi"
-      status           : string  — "Member" | "Spouse" | "Dependent"
+  (:Member)
+      bioguide_id      : string  — unique Congress identifier (primary key)
+      id               : string  — UUID
+      first_name       : string
+      last_name        : string
+      full_name        : string  — may be null
+      status           : string  — "Member" | "Spouse" | "Dependent" (filing status)
       state_district   : string  — e.g. "CA11"
-      last_updated     : datetime
+      state            : string  — e.g. "CA"
+      chamber          : string  — "house" | "senate" | "House" | "Senate"
+      party            : string  — may be null
+      leadership_role  : string  — may be null
+      created_at       : datetime
+      last_updated     : datetime — may be null
+      updated_at       : datetime — may be null
+
+  (:Committee)
+      id               : string  — UUID (unique)
+      committee_id     : string  — Thomas/code id e.g. "SSAF"
+      title            : string  — committee name
+      chamber          : string  — "house" | "senate" | "joint"
+      is_subcommittee  : boolean
+      parent_committee_id : string — may be null
 
   (:Asset)
       ticker           : string  — unique identifier e.g. "GOOGL"
@@ -24,6 +42,10 @@ NODES:
       trade_date       : date    — e.g. date("2026-01-16")
       amount_range     : string  — lower bound integer as string e.g. "500001"
       description      : string  — raw description text, may be null
+      committee_relevance_score : float — 0.0–1.0 similarity to member committee jurisdiction, may be null
+      matched_committee_id      : string — UUID of best-matched committee, may be null
+      matched_committee_name    : string — may be null
+      relevance_method          : string — e.g. "committee_chunk_embedding", may be null
       created_at       : datetime
 
   (:Derivative:CallOption)
@@ -33,20 +55,32 @@ NODES:
 
 {# ── Relationship Definitions ────────────────────────────── #}
 RELATIONSHIPS:
-  (Person)-[:EXECUTED]->(Transaction)         — person performed this transaction
-  (Transaction)-[:INVOLVES]->(Asset)          — transaction is on this asset
-  (Asset)-[:ISSUED_BY]->(Issuer)              — asset belongs to this issuer
-  (Transaction)-[:OF_DERIVATIVE]->(Derivative)— transaction is on a derivative contract
-  (Derivative)-[:UNDERLYING_ASSET]->(Asset)   — derivative is based on this asset
+  (Member)-[:IS_MEMBER_OF {role}]->(Committee)
+      — legislator sits on this committee; role e.g. "Member" | "Chair"
+  (Member)-[:EXECUTED]->(Transaction)
+      — member performed this transaction
+  (Transaction)-[:INVOLVES]->(Asset)
+      — transaction is on this asset
+  (Asset)-[:ISSUED_BY]->(Issuer)
+      — asset belongs to this issuer
+  (Transaction)-[:OF_DERIVATIVE]->(Derivative)
+      — transaction is on a derivative contract
+  (Derivative)-[:UNDERLYING_ASSET]->(Asset)
+      — derivative is based on this asset
 
 {# ── Query Rules ─────────────────────────────────────────── #}
 STRICT RULES:
   1. Only use nodes, relationships, and properties defined above — never invent new ones.
-  2. Always use parameterised values with $ prefix e.g. $ticker, $name, $date.
-  3. For date comparisons use date() e.g. date("2026-01-01").
-  4. For amount_range comparisons, cast to integer: toInteger(t.amount_range) > $amount.
-  5. Always alias RETURN fields with AS e.g. RETURN p.name AS filer_name.
-  6. Use OPTIONAL MATCH when a relationship may not exist (e.g. Derivative).
-  7. Never use MERGE or CREATE — output SELECT (MATCH) queries only.
-  8. If the question cannot be answered from this schema, return exactly: 
+  2. Never use (:Person) — always use (:Member). Match members by bioguide_id, first_name, last_name, or full_name.
+  3. Always use parameterised values with $ prefix e.g. $ticker, $bioguide_id, $date.
+  4. For date comparisons use date() e.g. date("2026-01-01").
+  5. For amount_range comparisons, cast to integer: toInteger(t.amount_range) > $amount.
+  6. Always alias RETURN fields with AS e.g. RETURN m.full_name AS filer_name, m.bioguide_id AS bioguide_id.
+  7. Prefer returning graph entities (nodes, relationships, or paths) so results can render as a graph.
+     Good:  MATCH (m:Member)-[r:EXECUTED]->(t:Transaction)-[:INVOLVES]->(a:Asset)
+            RETURN m, r, t, a
+     Avoid returning only scalar columns when nodes are available.
+  8. Use OPTIONAL MATCH when a relationship may not exist (e.g. Derivative, Committee).
+  9. Never use MERGE or CREATE — output SELECT (MATCH) queries only.
+  10. If the question cannot be answered from this schema, return exactly:
      UNSUPPORTED_QUERY
