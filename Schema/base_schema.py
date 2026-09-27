@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Optional, List, Literal
+from typing import Any, Optional, List, Literal, Dict
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, field_validator
@@ -30,6 +30,14 @@ class CommitteeEmbeddings(CommitteeBase):
 
 class CreateCommitteeRequest(AppBaseModel):
     congress_num: int
+    
+
+# Firecrawl schemas ─────────────────────────────────────────────────────
+
+
+class NodeSearchRequest(AppBaseModel):
+    node_id: str
+    
 
 
 # Document schemas ─────────────────────────────────────────────────────
@@ -39,6 +47,11 @@ class IngestRequest(BaseModel):
     year: Optional[str] = None
     count: Optional[int] = None
 
+
+class GetDocumentsRequest(BaseModel):
+    filters: Optional[Dict[str, Any]] = None
+    limit: Optional[int] = 200
+    offset: Optional[int] = 0
 
 class MonitorChangesRequest(BaseModel):
     year: Optional[str] = None

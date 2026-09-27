@@ -9,9 +9,10 @@ from Repository.documents_repository import DocumentRepository
 from Repository.graph_repository import Neo4jRepository, CommitteeRepository, TransactionRepository
 from Service.document_service import DocumentsService
 from Service.stock_gain_service import StockGainsService
+from Service.firecrawl_service import FirecrawlService
 from Service.commitee_service import CommitteeService
 from Service.graph_service import GraphService
-from Schema.base_schema import CommitteeEmbeddings, IngestRequest, MonitorChangesRequest, GetAssociatedTransactions, CreateCommitteeRequest
+from Schema.base_schema import CommitteeEmbeddings, IngestRequest, MonitorChangesRequest, GetAssociatedTransactions, CreateCommitteeRequest, NodeSearchRequest, GetDocumentsRequest
 from Schema.graph_schema import GraphDTO
 from Schema.graph_search_schema import GraphSearchParams, LOOKUP_TYPE_OPTIONS
 router = APIRouter()
@@ -46,6 +47,7 @@ def _neo4j_service(session: Any, label: str, repo_type: str = "base") -> Neo4jRe
     repo = repo_class(session)  # ← Creates instance of the correct class
     repo.label = label
     return repo
+
 
 
 
@@ -158,6 +160,43 @@ async def ingest_documents(
         "messages_in_queue": count,
     }
 
+@doc_router.get("/documents", summary="Get documents from database.", status_code=status.HTTP_200_OK)
+async def get_documents(
+    uow: UoWDep,
+    limit: int = Query(200, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    filters: Optional[str] = Query(
+        None,
+        description='JSON object of column filters, e.g. {"doc_id_parsed": true}',
+    ),
+):
+    """Get documents from database. Query params only — do not send a body."""
+    parsed_filters = None
+    if filters not in (None, "", "{}"):
+        try:
+            import json as _json
+            parsed_filters = _json.loads(filters)
+        except Exception:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="filters must be a valid JSON object",
+            )
+        if not isinstance(parsed_filters, dict):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="filters must be a JSON object",
+            )
+
+    request = GetDocumentsRequest(
+        filters=parsed_filters,
+        limit=limit,
+        offset=offset,
+    )
+    service = DocumentsService(uow)
+    documents = await service.get_documents(request)
+    return {
+        "documents": documents,
+    }
 
 @doc_router.patch("/embeddings", summary="Check unprocessesed doc_ids, send to queue to process.", status_code=status.HTTP_201_CREATED)
 async def embeddings(
@@ -255,6 +294,55 @@ async def get_client_performance(
         raise HTTPException(
             status_code=500, 
             detail=f"Error processing CSV: {str(e)}"
+        )
+
+
+@doc_router.get("/user_preferences")
+async def get_user_preferences(
+    uow: UoWDep,
+):
+    """ Get user preferences. """
+    service = DocumentsService(uow)
+    try:
+        # This will, get user preferences from the database
+        # Preferences are the following: Cron Runtime job, Emails, Transaction { Buy, Sell, Relevance..}
+
+        pass
+    except Exception as e:
+        # In a real app, you'd log this error
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Error processing CSV: {str(e)}"
+        )
+
+
+# ── Firecrawl example routes ──────────────────────────────────────────────────────
+
+firecrawl_router = APIRouter(prefix="/firecrawl", tags=["Firecrawl"])
+
+@firecrawl_router.get("/node_search", summary="Search + scrape node context via Firecrawl", status_code=status.HTTP_200_OK)
+async def node_search(
+    neo4j_session: Neo4jDep,
+    node_id: str,
+):
+    """Build a Firecrawl search from a graph node, scrape top hits, return title/summary."""
+    graph_base = _neo4j_service(neo4j_session, label="", repo_type="base")
+    graph_service = GraphService(graph_base)
+    service = FirecrawlService()
+    node = await graph_service.get_node_by_id(node_id)
+    if node is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Node not found: {node_id}",
+        )
+    try:
+        return service.run(node)
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
         )
 
 
@@ -447,29 +535,32 @@ async def search_node(
 @neo4j_router.get("/node")
 async def get_node(
     session: Neo4jDep,
-    node_id: Optional[str] = Query(None, description="Member elementId or bioguide_id"),
+    node_id: Optional[str] = Query(None, description="Seed node id (elementId, bioguide_id, ticker, ...)"),
+    nodeType: str = Query(
+        "Member",
+        description="Seed node label: Member | Transaction | Asset | Issuer | Committee | Derivative",
+    ),
     depth: int = Query(
-        2,
+        5,
         ge=1,
-        le=2,
-        description="1=committees+transactions; 2=also assets, derivatives, issuers",
+        le=5,
+        description="Max path length from the seed (1..5)",
     ),
     rel_types: Optional[str] = Query(
         "IS_MEMBER_OF,EXECUTED,INVOLVES,OF_DERIVATIVE,UNDERLYING_ASSET,ISSUED_BY",
-        description="Comma-separated relationship types to expand",
+        description="Comma-separated relationship types allowed on the path",
     ),
 ):
     """
-    Expand a selected Member into a GraphDTO of connected nodes/edges
-    (committees, transactions, assets, derivatives, issuers).
-    Frontend can merge this into the existing graph on persona click.
+    Expand a selected node into a GraphDTO via variable-length paths.
+    Works for any label (not only Member).
     """
     if not node_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="node_id is required")
 
     graph_base = _neo4j_service(
         session,
-        label="",
+        label=nodeType,
         repo_type="base",
     )
     graph_service = GraphService(graph_base)
@@ -480,20 +571,23 @@ async def get_node(
         if part.strip()
     ] or None
 
-    neighborhood = await graph_service.get_node_neighborhood(
-        node_id=node_id,
-        depth=depth,
-        rel_types=parsed_rel_types,
-    )
+    try:
+        neighborhood = await graph_service.get_node_neighborhood(
+            node_id=node_id,
+            nodeType=nodeType,
+            depth=depth,
+            rel_types=parsed_rel_types,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
     if neighborhood is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
     return neighborhood
-
-
-
 
 
 # ── Collect both routers ──────────────────────────────────────────────────────
 
 router.include_router(doc_router)
 router.include_router(neo4j_router)
+router.include_router(firecrawl_router)

@@ -1,3 +1,22 @@
+# Shared defaults for queue workers (hot-reload monorepo via one volume mount).
+x-worker: &worker
+  networks:
+    - app_network
+  restart: unless-stopped
+  volumes:
+    - .:/oden
+  environment:
+    PYTHONPATH: /oden
+  env_file:
+    - .env
+  depends_on:
+    postgres:
+      condition: service_healthy
+    neo4j:
+      condition: service_healthy
+    rabbitmq:
+      condition: service_healthy
+
 services:
 
   api:
@@ -8,7 +27,7 @@ services:
     env_file:
       - .env
     volumes:
-      - .:/app            # hot-reload during development
+      - .:/app
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
     depends_on:
       postgres:
@@ -19,7 +38,6 @@ services:
         condition: service_healthy
     networks:
       - app_network
-    
     restart: unless-stopped
 
   # ── RabbitMQ ──────────────────────────────────────────────────────────────
@@ -28,17 +46,14 @@ services:
     container_name: rabbitmq
     hostname: rabbitmq-host
     environment:
-      RABBITMQ_HOST: admin
-      RABBITMQ_PASSWORD: password
-      RABBITMQ_DEFAULT_USER : admin
+      RABBITMQ_DEFAULT_USER: admin
       RABBITMQ_DEFAULT_PASS: password
-
     ports:
-      - "5672:5672"    # AMQP protocol port for application connections
-      - "15672:15672"  # Management UI web interface
+      - "5672:5672"
+      - "15672:15672"
     volumes:
-      - rabbitmq_data:/var/lib/rabbitmq  # Persist queue data
-      - rabbitmq_logs:/var/log/rabbitmq  # Persist logs
+      - rabbitmq_data:/var/lib/rabbitmq
+      - rabbitmq_logs:/var/log/rabbitmq
     healthcheck:
       test: rabbitmq-diagnostics check_port_connectivity
       interval: 30s
@@ -79,8 +94,8 @@ services:
       - NEO4J_ACCEPT_LICENSE_AGREEMENT=yes
       - NEO4J_PLUGINS=["apoc", "graph-data-science"]
     ports:
-      - "7474:7474"   # Browser UI
-      - "7687:7687"   # Bolt
+      - "7474:7474"
+      - "7687:7687"
     volumes:
       - neo4j_data:/data
       - neo4j_logs:/logs
@@ -94,93 +109,30 @@ services:
       - app_network
     restart: unless-stopped
 
-  # ── Worker-1 ───────────────────────────────────────────────────────────────────
+  # ── Workers ─────────────────────────────────────────────────────────────────
   document-processor:
+    <<: *worker
     build:
       context: .
       dockerfile: workers/document_processor/Dockerfile
-    environment:
-      - PYTHONPATH=/:/app:/Config:/Database:/:Repository/:Core/:Schema/:Prompts/:LLM/:Extract_external:/Embeddings
-    depends_on:
-      postgres:
-        condition: service_healthy
-      neo4j:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-    volumes:
-      - ./Config:/Config
-      - ./Core:/Core
-      - ./MessageBroker:/MessageBroker
-      - ./Schema:/Schema
-      - ./Repository:/Repository
-      - ./LLM:/LLM
-      - ./Extract_external:/Extract_external
-      - ./Service:/Service
-      - ./Database:/Database
-      - ./Prompts:/Prompts
-      - ./Embeddings:/Embeddings
-      - ./workers/document_processor:/app
-    restart: unless-stopped
-    networks:
-      - app_network
+    working_dir: /oden/workers/document_processor
+    command: python main.py
 
   query-processor:
+    <<: *worker
     build:
       context: .
       dockerfile: workers/query_processor/Dockerfile
-    environment:
-      - PYTHONPATH=/:/app:/Config:/Database:/:Repository/:Core/:Schema/:Prompts/:LLM/:Extract_external/:Embeddings
-    depends_on:
-      postgres:
-        condition: service_healthy
-      neo4j:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-    volumes:
-      - ./Config:/Config
-      - ./Core:/Core
-      - ./MessageBroker:/MessageBroker
-      - ./Schema:/Schema
-      - ./Repository:/Repository
-      - ./LLM:/LLM
-      - ./Extract_external:/Extract_external
-      - ./Service:/Service
-      - ./Database:/Database
-      - ./Prompts:/Prompts
-      - ./Embeddings:/Embeddings
-      - ./workers/query_processor:/app
-    restart: unless-stopped
-    networks:
-      - app_network
+    working_dir: /oden/workers/query_processor
+    command: python main.py
 
   emailer-processor:
+    <<: *worker
     build:
       context: .
       dockerfile: workers/emailer_processor/Dockerfile
-    environment:
-      - PYTHONPATH=/:/app:/Config:/Database:/:Repository/:Core/:Schema/:Prompts/:MessageBroker/:Service
-    depends_on:
-      postgres:
-        condition: service_healthy
-      neo4j:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-    volumes:
-      - ./Config:/Config
-      - ./Core:/Core
-      - ./MessageBroker:/MessageBroker
-      - ./Schema:/Schema
-      - ./Repository:/Repository
-      - ./Service:/Service
-      - ./Database:/Database
-      - ./Prompts:/Prompts
-      - ./workers/emailer_processor:/app
-    restart: unless-stopped
-    networks:
-      - app_network
+    working_dir: /oden/workers/emailer_processor
+    command: python main.py
 
 volumes:
   postgres_data:
@@ -189,6 +141,8 @@ volumes:
   rabbitmq_data:
   rabbitmq_logs:
 
+# Shared bridge so other compose projects (e.g. firecrawl) can join as external.
 networks:
   app_network:
+    name: app_network
     driver: bridge

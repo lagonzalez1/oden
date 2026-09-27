@@ -1,10 +1,21 @@
 from sqlalchemy import text
 from Repository.base_repository import PostgresRepository
+from typing import Any
 
 class LegislatorRepository(PostgresRepository):
     table_name = "legislator"
     schema_name = "oden"
     pk_name = "id"
+
+    @property
+    def full_table_name(self) -> str:
+        """Returns the escaped full path: "schema"."table" """
+        return f'{self.schema_name}.{self.table_name}'
+
+    async def get_by_col(self, col: str, col_val: str) ->Any | None:
+        query = text(f"SELECT * FROM {self.full_table_name} WHERE {col} = :id")
+        result = await self._session.execute(query, {"id": col_val})
+        return result.mappings().first()
 
     ## Get legislator by name and or state_district
     async def get_legislator_by_name(self, first_name: str, last_name: str):

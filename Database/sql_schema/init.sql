@@ -251,3 +251,22 @@ CREATE INDEX IF NOT EXISTS idx_stock_industry ON oden.stock(industry);
 CREATE INDEX IF NOT EXISTS idx_stock_regulatory_domain ON oden.stock(regulatory_domain);
 CREATE INDEX IF NOT EXISTS idx_stock_ticker ON oden.stock(ticker);
 
+
+CREATE TABLE IF NOT EXISTS oden.transactions_extraction(
+    legislator_id UUID REFERENCES oden.legislator(id) ON DELETE CASCADE,
+    doc_id VARCHAR(255) REFERENCES oden.documents(doc_id) ON DELETE CASCADE,
+    extraction_type VARCHAR(100),
+    extraction_date TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    extraction_status VARCHAR(100),
+    extraction_details JSONB,
+    extraction_result JSONB,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS oden.user_preferences (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id VARCHAR(255) NOT NULL,
+    preferences JSONB DEFAULT NULL,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);

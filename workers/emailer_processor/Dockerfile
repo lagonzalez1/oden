@@ -1,22 +1,14 @@
-# workers/emailer_processor/Dockerfile
 FROM python:3.11-slim
 
-WORKDIR /app
+WORKDIR /oden/workers/emailer_processor
 
-# Install system dependencies for neo4j driver
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first (for better caching)
 COPY workers/emailer_processor/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy worker code
-COPY workers/emailer_processor/ /app/
+ENV PYTHONPATH=/oden
 
-# Set Python path to include all modules
-ENV PYTHONPATH="/:/app:/Config:/Database:/:Repository/:Core/:Schema/:Prompts/:MessageBroker/:Service"
-
-# Run the worker
 CMD ["python", "main.py"]

@@ -9,6 +9,7 @@ from MessageBroker.rabbitmq_client import rabbitmq_client
 from Extract_external.main import ExtractWikiContent
 from Extract_external.main2 import HouseCommitteeParser
 from Embeddings.main import EmbeddingService
+from Schema.base_schema import GetDocumentsRequest
 import logging
 import zipfile
 import requests
@@ -33,6 +34,17 @@ class DocumentsService:
         self.uow = uow
 
     # ── Read ──────────────────────────────────────────────────────────────────
+
+    async def get_documents(self, request: GetDocumentsRequest) -> List[Dict[str, Any]]:
+        """ Get documents from database. """
+        try:
+            async with self.uow:
+                documents = await self.uow.documents.get_table(filters=request.filters, limit=request.limit, offset=request.offset)
+                await self.uow.commit()
+            return documents
+        except Exception as e:
+            logger.error(f"[Document Service] Failed to get documents: {e}")
+            raise e
 
 
     async def get_document_by_id(self, doc_id: str) -> bool:
@@ -154,7 +166,7 @@ class DocumentsService:
                 found = await self.uow.documents.get_by_id(str(doc_id))
                 await self.uow.commit()
                 
-                if found:
+                if found and found['doc_id_parsed'] == True:
                     skipped_count += 1
                     continue
                 
@@ -171,6 +183,7 @@ class DocumentsService:
                     "filing_year": int(year_val) if year_val and str(year_val).isdigit() else None,
                     "filing_date": row.get("FillingDate"),
                     "processed_date": datetime.now(),
+                    "processed_status": "IN-QUEUE",
                     "doc_id_parsed": False,
                     "last_updated_date": datetime.now(),
                     "doc_size": 0

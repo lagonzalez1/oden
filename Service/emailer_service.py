@@ -4,7 +4,6 @@ from email.mime.multipart import MIMEMultipart
 from typing import Optional
 import os
 import logging
-
 from Core.unit_of_work import AbstractUnitOfWork
 
 logger = logging.getLogger(__name__)

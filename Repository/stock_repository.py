@@ -8,6 +8,17 @@ class StockRepository(PostgresRepository):
     schema_name = "oden"
     pk_name = "id"
 
+
+    @property
+    def full_table_name(self) -> str:
+        """Returns the escaped full path: "schema"."table" """
+        return f'{self.schema_name}.{self.table_name}'
+
+    async def get_by_col(self, col: str, col_val: str) ->Any | None:
+        query = text(f"SELECT * FROM {self.full_table_name} WHERE {col} = :id")
+        result = await self._session.execute(query, {"id": col_val})
+        return result.mappings().first()
+
     async def get_distinct_clients(self):
         query = text(f"SELECT DISTINCT filer_name FROM {self.full_table_name}")
         result = await self._session.execute(query)

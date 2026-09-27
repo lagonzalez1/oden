@@ -2,9 +2,7 @@ import asyncio
 import json
 import logging
 from typing import Any, Dict, Optional
-
 import aio_pika
-
 from MessageBroker.rabbitmq_client import RabbitMQConfig, rabbitmq_client
 from Config.settings import settings
 from Core.SqlAlchemyUnitOfWork import SqlAlchemyUnitOfWork
@@ -21,7 +19,6 @@ QUEUE_NAME = "emailer_service"
 def _emailer_service(session: Any) -> EmailerService:
     uow = SqlAlchemyUnitOfWork(session)
     return EmailerService(uow)
-
 
 async def process_email_task(
     body,

@@ -4,6 +4,7 @@ from Repository.stock_repository import StockRepository
 from Repository.committee_repository import CommitteeRepository
 from Repository.commitee_chunk_repository import CommitteeChunkRepository
 from Repository.legislator_repository import LegislatorRepository
+from Repository.transactions_extraction_repository import TransactionsExtractionRepository
 from Core.unit_of_work import AbstractUnitOfWork
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -53,6 +54,11 @@ class SqlAlchemyUnitOfWork(AbstractUnitOfWork):
         self.committee_chunks.schema_name = "oden"
         self.committee_chunks.table_name = "committee_chunks"
         self.committee_chunks.pk_name = "id"
+
+        self.transactions_extraction = TransactionsExtractionRepository(self._session)
+        self.transactions_extraction.schema_name = "oden"
+        self.transactions_extraction.table_name = "transactions_extraction"
+        self.transactions_extraction.pk_name = "id"
 
 
         return self

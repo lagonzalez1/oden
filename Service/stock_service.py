@@ -44,6 +44,7 @@ class StockService:
             logger.error(f"[Stock Service] Get stock by ticker failed for {ticker}: {e}")
             raise e
 
+    
     # ── Write ─────────────────────────────────────────────────────────────────
 
     async def create_stocks(self, stocks_data: List[Dict[str, Any]]) -> bool:

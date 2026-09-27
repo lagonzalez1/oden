@@ -4,7 +4,7 @@ from Repository.documents_repository import AbstractRepository
 from Repository.committee_repository import CommitteeRepository
 from Repository.commitee_chunk_repository import CommitteeChunkRepository
 from Repository.legislator_repository import LegislatorRepository
-
+from Repository.transactions_extraction_repository import TransactionsExtractionRepository
 # Assuming T is your Document model type
 T = TypeVar("T")
 
@@ -17,7 +17,8 @@ class AbstractUnitOfWork(ABC):
     legislator: LegislatorRepository
     committee_membership: CommitteeRepository
     committee_chunks: CommitteeChunkRepository
-
+    transactions_extraction: TransactionsExtractionRepository
+    
     async def __aenter__(self) -> "AbstractUnitOfWork":
         return self
 

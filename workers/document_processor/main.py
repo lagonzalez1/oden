@@ -7,20 +7,21 @@ from typing import Dict, Optional, Any, List
 from MessageBroker.rabbitmq_client import RabbitMQConfig, rabbitmq_client
 from Config.settings import settings
 import aio_pika
-from Core.dependencies import PostgresDep, Neo4jDep
-from Repository.documents_repository import DocumentRepository
-from Repository.graph_repository import TransactionRepository
+from Core.dependencies import PostgresDep, Neo4jDep, UoWDep
 from Core.SqlAlchemyUnitOfWork import SqlAlchemyUnitOfWork
-from Service.commitee_service import CommitteeService
-from Service.document_service import DocumentsService
-from Service.member_service import MemberService
-from Service.stock_service import StockService
-from Service.graph_service import GraphService as GraphService
-from Downloads.DownloadFile import DownloadFile 
+from Downloads.DownloadFile import DownloadFile
+from Repository.graph_repository import TransactionRepository
 from Transaction.ProcessTransaction import ProcessTransaction
 from Agents.AgentProcessor import AgentProcessor
 from Database.postgres import postgres_db
 from Database.neo4j_ import neo4j_db
+from Service import (
+    CommitteeService,
+    DocumentsService,
+    MemberService,
+    StockService,
+    GraphService)
+
 import uuid
 
 

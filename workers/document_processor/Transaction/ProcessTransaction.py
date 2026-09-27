@@ -91,6 +91,7 @@ class ProcessTransaction:
                     stocks_by_ticker=stocks_by_ticker or {},
                     bioguide_id=bioguide_id,
                 )
+
                 await self._ingest_to_graph(content)
 
             await self._update_document_status(doc_id, doc_size, success=True)
@@ -101,6 +102,8 @@ class ProcessTransaction:
             logger.error(f"[ProcessTransaction] Failed to process doc_id {doc_id}: {e}")
             await self._update_document_status(doc_id, doc_size, success=False)
             return False
+
+    
 
     async def _enrich_transactions_with_similarity(
         self,

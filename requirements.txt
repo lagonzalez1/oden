@@ -25,3 +25,5 @@ lxml
 beautifulsoup4
 bs4
 neontology
+firecrawl-py 
+langchain-ollama

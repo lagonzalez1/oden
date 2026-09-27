@@ -15,6 +15,15 @@ pika
 aio-pika
 
 python-multipart
+pymupdf
 aiohttp
 requests
 jinja2
+pymupdf4llm
+ollama
+pillow
+pandas
+lxml
+yfinance
+beautifulsoup4
+neontology

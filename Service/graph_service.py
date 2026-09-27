@@ -51,14 +51,16 @@ class GraphService(Generic[T]):
     async def get_node_neighborhood(
         self,
         node_id: str,
-        depth: int = 2,
+        nodeType: str = "Member",
+        depth: int = 5,
         rel_types: Optional[List[str]] = None,
     ) -> GraphDTO | None:
         """
-        Return a Member-centered subgraph (committees, transactions, assets).
+        Expand a seed node (any label) into a GraphDTO via path neighborhood.
         """
         return await self._repo.get_node_neighborhood(
             node_id=node_id,
+            nodeType=nodeType,
             depth=depth,
             rel_types=rel_types,
         )
@@ -72,6 +74,10 @@ class GraphService(Generic[T]):
         return await self._repo.run_cypher_to_graph(cypher=cypher, params=params)
 
     
+    async def get_node_by_id(self, id: str)->NodeDTO | None:
+        """ Get a node by its id. """
+        return await self._repo.get_by_id(record_id=id)
+
     async def get_node_by_label(
         self,
         label: str,
